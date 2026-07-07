@@ -1,112 +1,161 @@
-# Short-Term Electricity Load Forecasting (German Grid)
+# Kurzfrist-Lastprognose für das deutsche Stromnetz
 
-Forecasting German electricity demand **1–48h ahead** from open data. The focus is
-**honest, leakage-free evaluation against strong baselines** — the model is only
-interesting insofar as it beats them, measured on a proper rolling-origin backtest.
+Prognose der deutschen Netzlast (Stromverbrauch) **1–48 Stunden im Voraus** aus offenen
+Daten. Der Kern des Projekts ist nicht ein möglichst ausgefallenes Modell, sondern eine
+**ehrliche, leckagefreie Evaluation gegen starke Baselines**: Ein Modell ist nur
+interessant, solange es diese Baselines auf einem sauberen Backtest tatsächlich schlägt.
 
-## Problem
+**▶️ Live-Demo:** _(Link wird nach dem Deploy ergänzt — bis dahin lokal startbar, siehe
+[App starten](#app-starten))_
 
-Grid operators and traders need short-term load forecasts. This project predicts hourly
-German grid load (Netzlast) up to 48 hours ahead and reports, per horizon, how much a
-learned model actually improves over naive seasonal baselines.
+## Worum es geht und warum es nützt
 
-## Data
+Netzbetreiber und Händler brauchen belastbare Kurzfristprognosen der Last — sie sind die
+Grundlage für **Fahrplanmanagement und Netzbilanz**, die Vorhaltung von **Regelleistung
+(Reserve)**, **Redispatch** und den **Day-Ahead-/Intraday-Handel**. Jede Megawattstunde
+Prognosefehler muss später teuer über Reserve- und Ausgleichsenergie aufgefangen werden.
+Eine bessere Prognose bedeutet also unmittelbar weniger vorzuhaltende Reserve und
+geringere Ausgleichskosten.
 
-All sources are open and require no API token; a fresh clone rebuilds everything with
-`python -m src.data`.
+Das Projekt prognostiziert die stündliche deutsche Netzlast bis zu 48 Stunden voraus und
+zeigt **pro Horizont**, wie viel ein gelerntes Modell gegenüber naiven, saisonalen
+Baselines wirklich gewinnt.
 
-| Source | Role | Detail |
+**Ergebnis vorweg:** Auf 24 Stunden senkt das Modell den mittleren absoluten Fehler von
+rund **2.600 MW** (saisonal-naiv) auf etwa **1.400 MW** — im Schnitt **~1.200 MW weniger
+Fehler**, die Größenordnung eines großen Kraftwerksblocks, den man nicht als Reserve
+vorhalten muss. Das entspricht **2,7 % MAPE** auf 24 Stunden.
+
+## Daten — Auswahl und Begründung
+
+Alle Quellen sind offen und **ohne API-Token** nutzbar; ein frischer Clone baut den
+kompletten Datensatz mit `python -m src.data` neu auf.
+
+| Quelle | Rolle | Details |
 | --- | --- | --- |
-| [SMARD.de](https://www.smard.de) (Bundesnetzagentur) | **Target** | Grid load (Netzlast), hourly, chart_data API (filter 410, region DE) |
-| [Open-Meteo](https://open-meteo.com) | Feature | 2 m temperature, population-weighted over the six largest cities |
-| [Energy-Charts](https://api.energy-charts.info) (Fraunhofer ISE) | Feature | Day-ahead price (DE-LU) and generation mix |
+| [SMARD.de](https://www.smard.de) (Bundesnetzagentur) | **Ziel** | Netzlast, stündlich, `chart_data`-API (Filter 410, Region DE) |
+| [Open-Meteo](https://open-meteo.com) | Merkmal | 2 m-Temperatur, bevölkerungsgewichtet über die sechs größten Städte |
+| [Energy-Charts](https://api.energy-charts.info) (Fraunhofer ISE) | Merkmal | Day-Ahead-Preis (DE-LU) und Erzeugungsmix |
 
-Everything is aligned to one hourly index in **Europe/Berlin** (DST handled by
-converting from UTC), covering **2021-01 to present** (~48k hours). Loading and
-assembly live in [`src/data.py`](src/data.py).
+Warum diese Wahl:
 
-## Method
+- **SMARD als Ziel**, weil es die offizielle, token-freie Quelle der Bundesnetzagentur
+  ist und die realisierte Netzlast in konsistenter Stundenauflösung liefert.
+- **Temperatur als wichtigster exogener Treiber** — Heizen und Kühlen bestimmen den
+  kurzfristigen Verbrauch stark. Statt eines einzelnen Messpunkts wird ein
+  **bevölkerungsgewichteter Mittelwert** über die sechs größten Städte gebildet, der die
+  nachfragerelevante Temperatur des Landes besser abbildet.
+- **Preis und Erzeugungsmix** ergänzen das Bild um Markt- und Einspeisesignale; sie
+  gehen bewusst nur **verzögert (als Lags)** ein, weil ihr aktueller Wert zum
+  Prognosezeitpunkt noch nicht bekannt ist.
+- **Stündliche Auflösung ab 2021**: fein genug für die Tages- und Wochenstruktur der
+  Last und mit ~4,5 Jahren Historie lang genug für einen aussagekräftigen
+  rollierenden Backtest.
 
-1. **EDA** ([`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)) — daily/weekly/yearly
-   seasonality, the holiday effect, data quality, autocorrelation, and load–temperature
-   structure.
-2. **Baselines** — daily persistence (same hour, previous whole day) and **seasonal-naive**
-   (same hour, previous week). Seasonal-naive is a genuinely strong baseline for load.
-3. **Model** — LightGBM on lag, calendar, weather and (lagged) price/mix features. A
-   **direct multi-horizon** setup: one model per horizon predicting `y(t+h)` from
-   information available at `t`.
-4. **Evaluation** ([`notebooks/02_modeling.ipynb`](notebooks/02_modeling.ipynb)) —
-   a **rolling-origin backtest**, never a random split. LightGBM is retrained monthly on
-   a rolling two-year window and scored on the following month; baselines are scored on
-   exactly the same timestamps. Metrics: MAE, MAPE, RMSE per horizon, always relative to
-   the baselines.
+Alles wird auf **einen** stündlichen Index in **Europe/Berlin** ausgerichtet (die
+Sommer-/Winterzeit wird sauber über die Umrechnung aus UTC behandelt). Laden und
+Zusammenführen liegen in [`src/data.py`](src/data.py).
 
-**Leakage discipline** is the point of the project and is enforced in code and tests:
+## Methode
 
-- every feature at target time `τ = t+h` uses only data available at the origin `t`;
-- lags and rolling statistics are shifted so the current value never enters its own window;
-- weather is included as the temperature at the target hour — a **perfect-forecast
-  proxy**, called out below as a limitation — while price and generation mix enter only
-  as lags known at `t`;
-- [`tests/test_pipeline.py`](tests/test_pipeline.py) asserts the lag shifts and the
-  no-overlap property of the backtest folds.
+1. **EDA** ([`notebooks/01_eda.ipynb`](notebooks/01_eda.ipynb)) — Tages-, Wochen- und
+   Jahressaisonalität, der Feiertagseffekt, Datenqualität, Autokorrelation und der
+   Zusammenhang von Last und Temperatur. Jeder Schritt ist begründet dokumentiert.
+2. **Baselines** — Tagespersistenz (gleiche Stunde, ganzer Vortag) und **saisonal-naiv**
+   (gleiche Stunde, Vorwoche). Wegen der starken Wochenstruktur der Last ist saisonal-naiv
+   eine ernstzunehmende Messlatte, nicht bloß ein Strohmann.
+3. **Modell** — LightGBM auf Lag-, Kalender-, Wetter- und (verzögerten) Preis-/Mix-
+   Merkmalen. Aufbau als **direkte Multi-Horizont-Prognose**: ein Modell je Horizont,
+   das `y(t+h)` aus den zum Zeitpunkt `t` verfügbaren Informationen schätzt.
+4. **Evaluation** ([`notebooks/02_modeling.ipynb`](notebooks/02_modeling.ipynb)) — ein
+   **rollierender Backtest (rolling origin)**, niemals ein zufälliger Split. LightGBM wird
+   monatlich auf einem rollierenden Zwei-Jahres-Fenster neu trainiert und auf dem
+   Folgemonat bewertet; die Baselines werden auf **exakt denselben** Zeitstempeln
+   gemessen. Metriken: MAE, MAPE, RMSE je Horizont, immer relativ zu den Baselines.
 
-## Results
+**Leckagefreiheit** ist der eigentliche Punkt des Projekts und wird in Code und Tests
+erzwungen:
 
-Rolling-origin backtest over 2022–2026 (monthly retrain, two-year window). LightGBM
-beats the strong seasonal-naive baseline at **every** horizon — by **82 % at 1 h** and
-still **36 % at 48 h** ahead. At the 24 h horizon it forecasts hourly German load to
-**2.7 % MAPE (≈1,400 MW)**.
+- Jedes Merkmal zur Zielzeit `τ = t+h` nutzt ausschließlich Daten, die zum Ursprung `t`
+  verfügbar sind.
+- Lags und rollierende Statistiken sind so verschoben, dass der aktuelle Wert nie in sein
+  eigenes Fenster einfließt.
+- Wetter geht als Temperatur zur Zielstunde ein — ein **perfekter-Vorhersage-Proxy**, der
+  unten offen als Grenze benannt wird; Preis und Erzeugungsmix gehen nur als zum
+  Zeitpunkt `t` bekannte Lags ein.
+- [`tests/test_pipeline.py`](tests/test_pipeline.py) prüft die Lag-Verschiebungen und die
+  Überschneidungsfreiheit der Backtest-Folds.
 
-| Horizon | LightGBM MAE | LightGBM MAPE | Seasonal-naive MAE | MAE reduction |
+## Ergebnisse
+
+Rollierender Backtest über 2022–2026 (monatliches Neutraining, Zwei-Jahres-Fenster; die
+Daten reichen bis 2021 zurück, das erste Trainingsfenster verbraucht das erste Jahr).
+LightGBM schlägt die starke saisonal-naive Baseline auf **jedem** Horizont — um **82 %
+auf 1 h** und immer noch **36 % auf 48 h**. Auf 24 Stunden prognostiziert es die
+stündliche deutsche Last auf **2,7 % MAPE (≈ 1.400 MW)**.
+
+| Horizont | LightGBM MAE | LightGBM MAPE | Saisonal-naiv MAE | MAE-Reduktion |
 | ---: | ---: | ---: | ---: | ---: |
-| 1 h  | 482 MW   | 0.92 % | 2,605 MW | **−81.5 %** |
-| 6 h  | 1,229 MW | 2.34 % | 2,604 MW | −52.8 % |
-| 12 h | 1,398 MW | 2.66 % | 2,602 MW | −46.3 % |
-| 24 h | 1,395 MW | 2.67 % | 2,598 MW | −46.3 % |
-| 48 h | 1,665 MW | 3.17 % | 2,595 MW | −35.8 % |
+| 1 h  | 482 MW   | 0,92 % | 2.605 MW | **−81,5 %** |
+| 6 h  | 1.229 MW | 2,34 % | 2.604 MW | −52,8 % |
+| 12 h | 1.398 MW | 2,66 % | 2.602 MW | −46,3 % |
+| 24 h | 1.395 MW | 2,67 % | 2.598 MW | −46,3 % |
+| 48 h | 1.665 MW | 3,17 % | 2.595 MW | −35,8 % |
 
-![Backtest MAE by horizon](reports/error_by_horizon.png)
+![Backtest-MAE nach Horizont](reports/error_by_horizon.png)
 
-The daily-persistence naive baseline is weaker still (7–12 % MAPE) and is omitted from
-the table for brevity; it appears in the figure and the app. Full per-horizon numbers,
-error analysis and feature importances are in
+Die Tagespersistenz-Baseline ist noch schwächer (7–12 % MAPE) und ist der Übersicht
+halber aus der Tabelle ausgelassen; sie erscheint in der Abbildung und in der App. Die
+vollständigen Zahlen je Horizont, die Fehleranalyse und die Feature-Importances stehen in
 [`notebooks/02_modeling.ipynb`](notebooks/02_modeling.ipynb).
 
-## Repo layout
+## App starten
 
-```
-src/            data.py · features.py · model.py · evaluate.py · config.py
-notebooks/      01_eda.ipynb · 02_modeling.ipynb
-app/            streamlit_app.py  (forecast vs. actual + metrics)
-tests/          leakage & backtest-integrity tests
-data/           raw/ + processed/ (git-ignored; rebuilt by src.data)
-```
+Die interaktive Streamlit-App zeigt „Prognose vs. Ist" und die Metriken gegen die
+Baselines — das Schaustück des Projekts.
 
-## How to run
+**Am einfachsten:** die gehostete Live-Demo oben anklicken (kein Setup nötig).
+
+**Lokal:**
 
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-python -m src.data        # fetch + assemble data/processed/dataset.parquet
-python -m src.evaluate    # rolling-origin backtest -> metrics + predictions
-pytest                    # leakage / backtest-integrity tests
-
-streamlit run app/streamlit_app.py   # the interactive artifact
+streamlit run app/streamlit_app.py
 ```
 
-## Limitations & next steps
+Die App liegt bereits mit den eingecheckten Backtest-Ergebnissen vor und startet ohne
+weiteren Datenabruf. Um die Pipeline komplett neu aufzubauen:
 
-- **Weather is a perfect-forecast proxy.** Training on observed temperature is
-  optimistic; a production system would feed a numerical weather forecast, whose error
-  would widen the load error at longer horizons.
-- **Single price zone / national holidays.** Price uses the DE-LU day-ahead zone and the
-  calendar uses national holidays only, ignoring Bundesland-specific days.
-- **Point forecasts.** No predictive intervals yet — quantile/probabilistic forecasts
-  are the natural next step.
-- **Minimal tuning.** LightGBM runs on sensible defaults; the emphasis is the evaluation,
-  not squeezing the last few percent.
+```bash
+python -m src.data        # Daten holen + data/processed/dataset.parquet zusammenführen
+python -m src.evaluate    # rollierender Backtest -> Metriken + Prognosen
+pytest                    # Leckage-/Backtest-Integritätstests
+```
+
+## Aufbau des Repos
+
+```
+src/            data.py · features.py · model.py · evaluate.py · config.py
+notebooks/      01_eda.ipynb · 02_modeling.ipynb
+app/            streamlit_app.py  (Prognose vs. Ist + Metriken)
+tests/          Leckage- und Backtest-Integritätstests
+data/           raw/ + processed/ (git-ignoriert; von src.data neu aufgebaut)
+```
+
+## Grenzen und nächste Schritte
+
+- **Wetter ist ein perfekter-Vorhersage-Proxy.** Auf der beobachteten Temperatur zu
+  trainieren ist optimistisch; ein Produktivsystem würde eine numerische Wettervorhersage
+  einspeisen, deren Fehler die Lastprognose vor allem auf langen Horizonten aufweiten
+  würde. Das ist die ehrlichste Einschränkung der Ergebnisse.
+- **Eine Preiszone / nationale Feiertage.** Der Preis nutzt die Day-Ahead-Zone DE-LU, der
+  Kalender nur bundesweite Feiertage — bundeslandspezifische Tage bleiben außen vor.
+- **Punktprognosen.** Noch keine Prognoseintervalle — quantile/probabilistische
+  Vorhersagen sind der natürliche nächste Schritt.
+- **Wenig Tuning.** LightGBM läuft auf vernünftigen Standardwerten; der Fokus liegt auf
+  der Evaluation, nicht auf den letzten Prozentpunkten.
 
 ---
-*Part of [DS-Portfolio](../README.md).*
+*Teil des [DS-Portfolios](../README.md).*
