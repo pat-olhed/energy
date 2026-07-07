@@ -5,8 +5,8 @@ Daten. Der Kern des Projekts ist nicht ein möglichst ausgefallenes Modell, sond
 **ehrliche, leckagefreie Evaluation gegen starke Baselines**: Ein Modell ist nur
 interessant, solange es diese Baselines auf einem sauberen Backtest tatsächlich schlägt.
 
-**▶️ Live-Demo:** _(Link wird nach dem Deploy ergänzt — bis dahin lokal startbar, siehe
-[App starten](#app-starten))_
+**▶️ Live-Demo: [energy-forecast-poh.streamlit.app](https://energy-forecast-poh.streamlit.app/)**
+— Prognose vs. Ist und die Metriken gegen die Baselines, ohne Setup direkt im Browser.
 
 ## Worum es geht und warum es nützt
 
