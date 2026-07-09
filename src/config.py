@@ -37,6 +37,32 @@ SMARD_LOAD_FILTER = 410          # "Stromverbrauch: Gesamt (Netzlast)"
 SMARD_LOAD_REGION = "DE"         # Germany, national grid load
 SMARD_RESOLUTION = "hour"
 
+# --- SMARD price + day-ahead forecast series (VERIFIED 2026-07-09) ----------
+# Same token-free chart_data API as the load series. IDs come from SMARD's
+# market_data_configuration.json (field `data_id`), cross-checked by correlation
+# (see PLAN.md / research/02_smard-datenkatalog.md). The day-ahead auction price
+# is the headline target; the forecast series are fundamentals known *before* gate
+# closure, so they are leakage-free inputs for predicting day D.
+SMARD_PRICE_FILTER = 4169            # day-ahead wholesale price DE/LU (history from 2018-09-30)
+SMARD_PRICE_REGION = "DE-LU"
+SMARD_FORECAST_REGION = "DE"         # the day-ahead forecast series are published for region DE
+SMARD_FORECAST_FILTERS = {           # dataset column -> SMARD filter id
+    "load_fc_MW": 411,               # forecast consumption / grid load (corr 0.989 vs. actual)
+    "wind_on_fc_MW": 123,            # forecast wind onshore
+    "wind_off_fc_MW": 3791,          # forecast wind offshore
+    "pv_fc_MW": 125,                 # forecast PV  (NB: 125, not 126)
+    "resload_fc_MW": 4362,           # forecast residual load, delivered directly (corr 0.991)
+}
+SMARD_RESLOAD_ACTUAL_FILTER = 4359   # actual residual load — EDA / plausibility cross-check only
+
+# --- price target & gate-closure framing -----------------------------------
+# The day-ahead auction fixes all 24 hourly prices of day D at once, at gate
+# closure (12:00 Europe/Berlin on day D-1). Every price feature must be known by
+# then; price lags are whole-day same-hour shifts (D-1/D-2/D-7). See features.py.
+PRICE_TARGET = "price_EUR_MWh"       # SMARD day-ahead price (the pivot's headline target)
+GATE_CLOSURE_HOUR = 12               # 12:00 Europe/Berlin on day D-1
+PRICE_LAGS = [24, 48, 168]           # same-hour price lags in hours: D-1, D-2, D-7
+
 # --- Energy-Charts (Fraunhofer ISE) ----------------------------------------
 ENERGY_CHARTS_BASE = "https://api.energy-charts.info"
 PRICE_BIDDING_ZONE = "DE-LU"     # single German-Luxembourg day-ahead zone
