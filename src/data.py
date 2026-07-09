@@ -179,7 +179,11 @@ def fetch_weather_openmeteo(
 def fetch_price_energy_charts(
     start: str = config.DATA_START, end: str | None = None
 ) -> pd.DataFrame:
-    """Hourly day-ahead spot price (EUR/MWh) for the DE-LU zone from Energy-Charts."""
+    """Hourly day-ahead spot price (EUR/MWh) for DE-LU from Energy-Charts.
+
+    Renamed to `price_ec_EUR_MWh` and kept as an independent cross-check against the
+    SMARD day-ahead price (`price_EUR_MWh`), which is the model target.
+    """
     end = end or pd.Timestamp.now(tz=config.TZ).strftime("%Y-%m-%d")
     session = _session()
 
@@ -188,7 +192,7 @@ def fetch_price_energy_charts(
         params = {"bzn": config.PRICE_BIDDING_ZONE, "start": chunk_start, "end": chunk_end}
         j = session.get(f"{config.ENERGY_CHARTS_BASE}/price", params=params, timeout=60).json()
         idx = pd.to_datetime(j["unix_seconds"], unit="s", utc=True).tz_convert(config.TZ)
-        frames.append(pd.Series(j["price"], index=idx, name="price_EUR_MWh"))
+        frames.append(pd.Series(j["price"], index=idx, name="price_ec_EUR_MWh"))
 
     s = pd.concat(frames)
     s = s[~s.index.duplicated(keep="first")].sort_index()
@@ -234,19 +238,77 @@ def fetch_generation_mix(
     ).rename_axis("timestamp")
 
 
+# --- SMARD price + day-ahead forecasts (the price pivot) -------------------
+
+def fetch_smard_price(start: str = config.DATA_START) -> pd.DataFrame:
+    """SMARD day-ahead wholesale price (EUR/MWh) for DE/LU — the headline target.
+
+    Thin wrapper over `fetch_smard_series`, reusing all its machinery (weekly chunks,
+    UTC->Berlin conversion, hourly resampling). The value column is renamed to the
+    configured target name so the rest of the pipeline is source-agnostic.
+    """
+    px = fetch_smard_series(
+        config.SMARD_PRICE_FILTER, config.SMARD_PRICE_REGION, start=start
+    )
+    return px.rename(columns={"value": config.PRICE_TARGET})
+
+
+def fetch_smard_forecasts(start: str = config.DATA_START) -> pd.DataFrame:
+    """SMARD day-ahead forecast fundamentals, aligned on one hourly index.
+
+    Each series (forecast load, wind onshore/offshore, PV, and SMARD's directly
+    delivered residual-load forecast) is published before the 12:00 gate closure, so
+    every column is a leakage-free input for predicting the next day's prices.
+    """
+    cols = []
+    for name, filter_id in config.SMARD_FORECAST_FILTERS.items():
+        s = fetch_smard_series(filter_id, config.SMARD_FORECAST_REGION, start=start)
+        cols.append(s["value"].rename(name))
+    return pd.concat(cols, axis=1).rename_axis("timestamp")
+
+
+def _check_residual_load(df: pd.DataFrame) -> None:
+    """Plausibility cross-check on the residual-load forecast (prints, never raises).
+
+    SMARD ships residual load two ways: directly (`resload_fc_MW`, filter 4362) and via
+    its components (load - wind - PV). They should agree closely; a large gap would mean
+    a wrong filter id or a unit mismatch. This is the built-in sanity check from PLAN.md.
+    """
+    need = {"load_fc_MW", "wind_on_fc_MW", "wind_off_fc_MW", "pv_fc_MW", "resload_fc_MW"}
+    if not need.issubset(df.columns):
+        return
+    derived = (
+        df["load_fc_MW"] - df["wind_on_fc_MW"] - df["wind_off_fc_MW"] - df["pv_fc_MW"]
+    )
+    both = pd.concat([derived.rename("derived"), df["resload_fc_MW"]], axis=1).dropna()
+    if both.empty:
+        print("residual-load cross-check: no overlapping rows to compare")
+        return
+    corr = both["derived"].corr(both["resload_fc_MW"])
+    mad = (both["derived"] - both["resload_fc_MW"]).abs().mean()
+    print(
+        f"residual-load cross-check: corr={corr:.4f}, mean abs diff={mad:,.0f} MW, "
+        f"n={len(both):,}  (derived load-wind-PV vs. SMARD 4362)"
+    )
+
+
 # --- assembly --------------------------------------------------------------
 
 def build_dataset(save: bool = True) -> pd.DataFrame:
-    """Fetch load + exogenous drivers, align on one hourly index, cache to parquet."""
+    """Fetch load + price + forecasts + exogenous drivers, align hourly, cache to parquet."""
     PROCESSED.mkdir(parents=True, exist_ok=True)
 
     load = to_hourly_load(fetch_smard_series())
     weather = fetch_weather_openmeteo()
-    price = fetch_price_energy_charts()
+    price = fetch_smard_price()               # SMARD day-ahead price -> target
+    price_ec = fetch_price_energy_charts()    # Energy-Charts price -> independent cross-check
+    forecasts = fetch_smard_forecasts()       # day-ahead fundamentals, known before gate closure
     mix = fetch_generation_mix()
 
-    df = load.join([weather, price, mix], how="left")
+    df = load.join([weather, price, price_ec, forecasts, mix], how="left")
     df = df.loc[df[config.TARGET].notna().idxmax():]  # trim leading all-NaN load
+
+    _check_residual_load(df)  # sanity-check the forecast fundamentals
 
     if save:
         load.to_parquet(config.LOAD_PARQUET)
