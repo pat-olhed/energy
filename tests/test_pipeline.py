@@ -16,6 +16,28 @@ def _ramp(n: int = 500) -> pd.DataFrame:
     return pd.DataFrame({config.TARGET: np.arange(n, dtype=float)}, index=idx)
 
 
+def _price_frame(days: int = 30, start: str = "2022-05-01") -> pd.DataFrame:
+    """Synthetic hourly price + SMARD forecast columns for the day-ahead builder.
+
+    May 2022 has no DST switch, so every day is a clean 24 hours. The price is a unique
+    per-hour counter, which makes it trivial to see which source hour a lag pulled from.
+    Forecast fundamentals are constants well outside the price range, so no feature can
+    accidentally equal another.
+    """
+    n = days * 24
+    idx = pd.date_range(start, periods=n, freq="h", tz=config.TZ)
+    df = pd.DataFrame(index=idx)
+    df[config.PRICE_TARGET] = np.arange(n, dtype=float)  # unique value per hour
+    df["load_fc_MW"] = 88_888.0
+    df["wind_on_fc_MW"] = 7_777.0
+    df["wind_off_fc_MW"] = 3_333.0
+    df["pv_fc_MW"] = 5_555.0
+    df["resload_fc_MW"] = (
+        df["load_fc_MW"] - df["wind_on_fc_MW"] - df["wind_off_fc_MW"] - df["pv_fc_MW"]
+    )
+    return df
+
+
 def test_add_lag_features_shift_and_rolling():
     df = _ramp()
     out = features.add_lag_features(df, lags_hours=[24], windows=[24])
@@ -44,6 +66,44 @@ def test_make_supervised_target_and_no_future_leak():
     # every feature must be knowable at the origin: none may equal the target value
     assert not (X.eq(y, axis=0).any().any())
     assert not X.isna().any().any() and not y.isna().any()
+
+
+def test_make_supervised_dayahead_lags_and_target():
+    df = _price_frame()
+    X, y = features.make_supervised_dayahead(df)
+
+    tau = y.index[400]
+    price = df[config.PRICE_TARGET]
+    # same-hour lags map to D-1 / D-2 / D-7 exactly
+    assert np.isclose(X.loc[tau, "price_lag_24"], price.loc[tau - pd.Timedelta(hours=24)])
+    assert np.isclose(X.loc[tau, "price_lag_48"], price.loc[tau - pd.Timedelta(hours=48)])
+    assert np.isclose(X.loc[tau, "price_lag_168"], price.loc[tau - pd.Timedelta(hours=168)])
+    # target at τ is the price at τ
+    assert np.isclose(y.loc[tau], price.loc[tau])
+    # nothing missing, and no feature equals the target (a crude leak tripwire)
+    assert not X.isna().any().any() and not y.isna().any()
+    assert not X.eq(y, axis=0).any().any()
+
+
+def test_make_supervised_dayahead_no_gate_closure_leak():
+    df = _price_frame()
+    sentinel = -1e6
+    day_d = pd.Timestamp("2022-05-20", tz=config.TZ)
+    df.loc[df.index.normalize() == day_d, config.PRICE_TARGET] = sentinel
+
+    X, y = features.make_supervised_dayahead(df)
+    price_cols = [c for c in X.columns if c.startswith("price_")]
+
+    # delivery hours ON day D must not see any price from day D itself — that is the
+    # auction outcome we predict, so no price feature may carry the sentinel.
+    tau_d = y.index[y.index.normalize() == day_d]
+    assert len(tau_d) == 24
+    assert not (X.loc[tau_d, price_cols] == sentinel).any().any()
+
+    # positive control: on day D+1 the same-hour lag_24 *must* pull day D's prices, so
+    # the sentinel has to appear — proving the test is sharp, not trivially true.
+    tau_d1 = y.index[y.index.normalize() == (day_d + pd.Timedelta(days=1))]
+    assert (X.loc[tau_d1, "price_lag_24"] == sentinel).all()
 
 
 def test_baselines_are_plain_shifts():
