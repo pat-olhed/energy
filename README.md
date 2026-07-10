@@ -19,6 +19,12 @@ verkleinert das Risiko im kurzfristigen Handel. Besonders wertvoll sind die Extr
 **negative Preise** (Überschuss aus Wind/PV) und **Preisspitzen** in knappen Stunden — die
 Momente, in denen sich eine gute Prognose in Euro auszahlt.
 
+**Abgrenzung zu SMARD:** SMARD veröffentlicht den *realisierten* Day-Ahead-Preis (das geräumte
+Ergebnis der EPEX-Auktion) und Fundamental-Prognosen für Last, Wind und PV — aber **keine
+Preisprognose**. Der realisierte Preis ist hier das Label, das das Modell zum Gate Closure
+schätzt; die Fundamental-Prognosen sind seine Eingaben. Eine eigenständige Vorhersage des
+Preises selbst liefert weder SMARD noch ENTSO-E — genau diese Lücke füllt das Projekt.
+
 **Ergebnis vorweg:** Über den rollierenden Backtest (2022–2026) senkt das Modell den
 mittleren absoluten Fehler der stärksten naiven Baseline (Tagespersistenz „gestern") von
 **34,1 €/MWh** auf **21,4 €/MWh** — eine Reduktion um **37,4 %**, und es schlägt jede naive
@@ -34,8 +40,10 @@ Zeitpunkt bereits bekannt sind:
 
 - **Fundamentaldaten sind SMARDs eigene Vor-Gate-Prognosen** — prognostizierte Last, Wind
   onshore/offshore, PV und die daraus resultierende **Residuallast-Prognose** (der primäre
-  Preistreiber). Weil dies *Prognosen* sind, die am Morgen des Tages D-1 veröffentlicht
-  werden, ist es leckagefrei, ihren Wert **zur Lieferstunde** zu verwenden. Das erspart dem
+  Preistreiber). Weil dies *Prognosen* sind — die **Day-Ahead**-Serie, am Vortag D-1
+  veröffentlicht, bewusst nicht die erst am Liefertag aktualisierte Intraday-Serie —, ist ihr
+  Wert **zur Lieferstunde** ex ante bekannt und damit leckagefrei nutzbar (zur verbleibenden
+  Vintage-Feinheit siehe unten unter *Grenzen*). Das erspart dem
   Modell einen perfekten-Vorhersage-Wetter-Proxy — ein bekanntes Ehrlichkeitsproblem
   wetterbasierter Prognosen entfällt hier bauartbedingt.
 - **Preishistorie strikt ≤ Gate Closure:** Same-Hour-Lags auf D-1/D-2/D-7 (deren Preiskurven
@@ -171,6 +179,15 @@ data/           raw/ + processed/ (git-ignoriert; von src.data neu aufgebaut)
 
 ## Grenzen und nächste Schritte
 
+- **Prognose-Vintage nicht aus dem Archiv rekonstruierbar.** Als Fundamentaldaten dienen SMARDs
+  **Day-Ahead**-Prognosen — bewusst nicht die Intraday-Prognosen, die erst am Liefertag (~08:00)
+  aktualisiert werden und deren Nutzung Leckage wäre. Die Day-Ahead-Werte werden am Vortag von
+  den ÜNB jedoch bis ~18:00 fortgeschrieben, also über das 12:00-Gate-Closure hinaus, während
+  SMARDs Archiv je Zeitstempel nur die konsolidierte Endfassung liefert (keine Vintage-Snapshots).
+  Die exakt um 12:00 verfügbare Version ist daraus nicht rekonstruierbar — ein potenziell mildes
+  optimistisches Bias, das hier offen benannt statt versteckt wird. Es dürfte gering sein
+  (Day-Ahead-Revisionen im Tagesverlauf sind klein), und die Vor-12:00-Version ist ohnehin genau
+  der Informationsstand, den die Auktion selbst einpreiste.
 - **Kein expliziter Gas- (TTF) / CO2-Preis (EUA).** Diese setzen den Brennstoff-Floor der
   Merit Order und trieben den Niveausprung 2022. Das Modell stützt sich auf **Preis-Lags als
   Proxy** für das Brennstoffkosten-Regime (der geräumte Vortagespreis kodiert die heutigen
