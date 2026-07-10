@@ -2,7 +2,7 @@
 
 The baselines are not optional — every learned model is reported relative to them.
 Both baselines are expressed in *target time* τ (the hour being predicted), so they
-line up directly with the supervised targets built in `features.make_supervised`.
+line up directly with the supervised targets built in `features.make_supervised_dayahead`.
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ def naive_forecast(y: pd.Series, horizon_hours: int = 24) -> pd.Series:
 def seasonal_naive_forecast(y: pd.Series, season_hours: int = 168) -> pd.Series:
     """Weekly seasonal baseline: ŷ(τ) = y(τ − 168h), i.e. same hour last week.
 
-    A strong baseline for electricity load, and valid for every horizon we forecast
-    (all ≤ 48h < 168h, so the reference is always in the past).
+    A strong baseline for the day-ahead price: a pure causal shift, so the reference is
+    always in the past.
     """
     return y.shift(season_hours)
 

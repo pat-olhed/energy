@@ -1,24 +1,17 @@
-"""Data loading for the energy-forecast project.
+"""Data loading for the day-ahead electricity-price forecast (DE/LU).
 
-Primary target: German grid load (Netzlast) from SMARD.de, the Bundesnetzagentur's
-open market-data platform — hourly, no API token. Alongside the target we pull a few
-exogenous drivers a real forecaster would plausibly have:
+Target: the German day-ahead wholesale price from SMARD.de, the Bundesnetzagentur's
+open market-data platform — hourly, no API token. Alongside the target we pull SMARD's
+own day-ahead forecast fundamentals (forecast load, wind onshore/offshore, PV, and the
+directly delivered residual-load forecast). Because these are forecasts published the
+morning of D-1 — before the 12:00 gate closure — they are leakage-free inputs for
+predicting the next day's prices.
 
-  * weather (Open-Meteo ERA5 reanalysis) — temperature dominates short-term demand;
-  * day-ahead spot price and generation mix (Energy-Charts, Fraunhofer ISE).
-
-Everything is aligned onto one hourly index in Europe/Berlin and is reproducible
-from a clean clone: `python -m src.data` fetches and caches the lot.
-
-Leakage note (see README): the weather series is reanalysis *actuals* standing in for
-a perfect forecast, and the generation mix is consumed downstream only as a *lagged*
-feature — its contemporaneous value is not known at forecast time.
+Everything is aligned onto one hourly index in Europe/Berlin and is reproducible from a
+clean clone: `python -m src.data` fetches and caches the lot.
 """
 from __future__ import annotations
 
-from pathlib import Path
-
-import numpy as np
 import pandas as pd
 import requests
 from requests.adapters import HTTPAdapter
@@ -26,7 +19,6 @@ from urllib3.util.retry import Retry
 
 from . import config
 
-RAW = config.RAW
 PROCESSED = config.PROCESSED
 
 
@@ -43,20 +35,9 @@ def _session(retries: int = 3, backoff: float = 0.5) -> requests.Session:
     return s
 
 
-def _year_chunks(start: str, end: str):
-    """Yield (start, end) date strings split at calendar-year boundaries."""
-    cur, last = pd.Timestamp(start), pd.Timestamp(end)
-    while cur <= last:
-        chunk_end = min(pd.Timestamp(f"{cur.year}-12-31"), last)
-        yield cur.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
-        cur = pd.Timestamp(f"{cur.year + 1}-01-01")
-
-
-# --- SMARD load ------------------------------------------------------------
-
 def fetch_smard_series(
-    filter_id: int = config.SMARD_LOAD_FILTER,
-    region: str = config.SMARD_LOAD_REGION,
+    filter_id: int,
+    region: str,
     resolution: str = config.SMARD_RESOLUTION,
     start: str = config.DATA_START,
 ) -> pd.DataFrame:
@@ -95,157 +76,12 @@ def fetch_smard_series(
     return out.loc[out.index >= pd.Timestamp(start, tz=config.TZ)]
 
 
-def load_raw_smard(path: str | Path) -> pd.DataFrame:
-    """Parse a manually downloaded SMARD load CSV (a fallback to the API).
-
-    SMARD's export uses ';' separators, ',' as decimal and '.' as thousands
-    separator, with the interval start held in the first date/time columns. Returns a
-    [value] frame indexed by an Europe/Berlin timestamp.
-    """
-    df = pd.read_csv(path, sep=";", decimal=",", thousands=".", na_values=["-", ""])
-    cols = list(df.columns)
-    ts = pd.to_datetime(
-        df[cols[0]].astype(str) + " " + df[cols[1]].astype(str),
-        dayfirst=True,
-        format="mixed",
-    ).dt.tz_localize(config.TZ, ambiguous="infer", nonexistent="shift_forward")
-
-    value_col = next(
-        (c for c in cols if "netzlast" in c.lower() or "load" in c.lower()),
-        df.select_dtypes("number").columns[-1],
-    )
-    out = pd.DataFrame(
-        {"value": pd.to_numeric(df[value_col], errors="coerce").to_numpy()},
-        index=pd.DatetimeIndex(ts),
-    ).rename_axis("timestamp")
-    out = out[~out.index.duplicated(keep="first")].sort_index()
-    return out
-
-
-def to_hourly_load(df: pd.DataFrame) -> pd.DataFrame:
-    """Tidy a raw [value] load frame into an hourly `load_MW` series.
-
-    Guarantees a regular hourly index in Europe/Berlin, resamples any sub-hourly data
-    to hourly means, and flags gaps (`load_imputed`) rather than silently filling large
-    holes — only short gaps (<= 3h) are interpolated.
-    """
-    s = df["value"].sort_index()
-    s = s[~s.index.duplicated(keep="first")]
-    s = s.resample("1h").mean()
-
-    out = s.to_frame(config.TARGET)
-    out["load_imputed"] = out[config.TARGET].isna()
-    out[config.TARGET] = out[config.TARGET].interpolate(limit=3, limit_area="inside")
-    return out
-
-
-# --- weather (Open-Meteo) --------------------------------------------------
-
-def fetch_weather_openmeteo(
-    start: str = config.DATA_START, end: str | None = None
-) -> pd.DataFrame:
-    """Population-weighted national 2m temperature from Open-Meteo's ERA5 archive.
-
-    One request per city over the full range, combined into a weighted mean. Returns
-    an hourly `temp_DE` (deg C) indexed in Europe/Berlin. Times are requested in UTC
-    and converted, which sidesteps any DST ambiguity.
-    """
-    end = end or pd.Timestamp.now(tz=config.TZ).strftime("%Y-%m-%d")
-    session = _session()
-
-    series, weights = {}, {}
-    for city in config.WEATHER_CITIES:
-        params = {
-            "latitude": city["lat"],
-            "longitude": city["lon"],
-            "start_date": start,
-            "end_date": end,
-            "hourly": "temperature_2m",
-            "timezone": "UTC",
-        }
-        hourly = session.get(config.OPEN_METEO_ARCHIVE, params=params, timeout=60).json()["hourly"]
-        idx = pd.to_datetime(hourly["time"], utc=True).tz_convert(config.TZ)
-        series[city["name"]] = pd.Series(hourly["temperature_2m"], index=idx)
-        weights[city["name"]] = city["weight"]
-
-    wide = pd.DataFrame(series)
-    w = pd.Series(weights)
-    temp = (wide * w).sum(axis=1) / w.sum()
-    return temp.rename("temp_DE").rename_axis("timestamp").to_frame()
-
-
-# --- price & generation mix (Energy-Charts) --------------------------------
-
-def fetch_price_energy_charts(
-    start: str = config.DATA_START, end: str | None = None
-) -> pd.DataFrame:
-    """Hourly day-ahead spot price (EUR/MWh) for DE-LU from Energy-Charts.
-
-    Renamed to `price_ec_EUR_MWh` and kept as an independent cross-check against the
-    SMARD day-ahead price (`price_EUR_MWh`), which is the model target.
-    """
-    end = end or pd.Timestamp.now(tz=config.TZ).strftime("%Y-%m-%d")
-    session = _session()
-
-    frames = []
-    for chunk_start, chunk_end in _year_chunks(start, end):
-        params = {"bzn": config.PRICE_BIDDING_ZONE, "start": chunk_start, "end": chunk_end}
-        j = session.get(f"{config.ENERGY_CHARTS_BASE}/price", params=params, timeout=60).json()
-        idx = pd.to_datetime(j["unix_seconds"], unit="s", utc=True).tz_convert(config.TZ)
-        frames.append(pd.Series(j["price"], index=idx, name="price_ec_EUR_MWh"))
-
-    s = pd.concat(frames)
-    s = s[~s.index.duplicated(keep="first")].sort_index()
-    s = s.resample("1h").mean()  # normalise hourly / quarter-hourly to hourly
-    return s.rename_axis("timestamp").to_frame()
-
-
-def fetch_generation_mix(
-    start: str = config.DATA_START, end: str | None = None
-) -> pd.DataFrame:
-    """Compact hourly generation-mix features from Energy-Charts `public_power`.
-
-    Returns `solar_MW`, `wind_MW` and `renewable_share` (0-1). Used downstream only as
-    lagged features, since the contemporaneous mix isn't known at forecast time.
-    """
-    end = end or pd.Timestamp.now(tz=config.TZ).strftime("%Y-%m-%d")
-    session = _session()
-
-    frames = []
-    for chunk_start, chunk_end in _year_chunks(start, end):
-        params = {"country": config.GENERATION_COUNTRY, "start": chunk_start, "end": chunk_end}
-        j = session.get(f"{config.ENERGY_CHARTS_BASE}/public_power", params=params, timeout=120).json()
-        idx = pd.to_datetime(j["unix_seconds"], unit="s", utc=True).tz_convert(config.TZ)
-        prod = {p["name"]: pd.Series(p["data"], index=idx) for p in j["production_types"]}
-        frames.append(pd.DataFrame(prod))
-
-    wide = pd.concat(frames)
-    wide = wide[~wide.index.duplicated(keep="first")].sort_index().resample("1h").mean()
-
-    def pick(name: str) -> pd.Series:
-        for c in wide.columns:
-            if c.strip().lower() == name.lower():
-                return wide[c]
-        return pd.Series(np.nan, index=wide.index)
-
-    solar = pick("Solar")
-    wind = pick("Wind onshore").fillna(0) + pick("Wind offshore").fillna(0)
-    share = pick("Renewable share of load")
-    if share.notna().any():
-        share = (share / 100.0).clip(0, 1)
-    return pd.DataFrame(
-        {"solar_MW": solar, "wind_MW": wind, "renewable_share": share}
-    ).rename_axis("timestamp")
-
-
-# --- SMARD price + day-ahead forecasts (the price pivot) -------------------
-
 def fetch_smard_price(start: str = config.DATA_START) -> pd.DataFrame:
     """SMARD day-ahead wholesale price (EUR/MWh) for DE/LU — the headline target.
 
     Thin wrapper over `fetch_smard_series`, reusing all its machinery (weekly chunks,
-    UTC->Berlin conversion, hourly resampling). The value column is renamed to the
-    configured target name so the rest of the pipeline is source-agnostic.
+    UTC->Berlin conversion). The value column is renamed to the configured target name
+    so the rest of the pipeline is source-agnostic.
     """
     px = fetch_smard_series(
         config.SMARD_PRICE_FILTER, config.SMARD_PRICE_REGION, start=start
@@ -272,7 +108,7 @@ def _check_residual_load(df: pd.DataFrame) -> None:
 
     SMARD ships residual load two ways: directly (`resload_fc_MW`, filter 4362) and via
     its components (load - wind - PV). They should agree closely; a large gap would mean
-    a wrong filter id or a unit mismatch. This is the built-in sanity check from PLAN.md.
+    a wrong filter id or a unit mismatch — a built-in sanity check on the fundamentals.
     """
     need = {"load_fc_MW", "wind_on_fc_MW", "wind_off_fc_MW", "pv_fc_MW", "resload_fc_MW"}
     if not need.issubset(df.columns):
@@ -292,26 +128,19 @@ def _check_residual_load(df: pd.DataFrame) -> None:
     )
 
 
-# --- assembly --------------------------------------------------------------
-
 def build_dataset(save: bool = True) -> pd.DataFrame:
-    """Fetch load + price + forecasts + exogenous drivers, align hourly, cache to parquet."""
+    """Fetch the day-ahead price + SMARD forecast fundamentals, align hourly, cache."""
     PROCESSED.mkdir(parents=True, exist_ok=True)
 
-    load = to_hourly_load(fetch_smard_series())
-    weather = fetch_weather_openmeteo()
-    price = fetch_smard_price()               # SMARD day-ahead price -> target
-    price_ec = fetch_price_energy_charts()    # Energy-Charts price -> independent cross-check
-    forecasts = fetch_smard_forecasts()       # day-ahead fundamentals, known before gate closure
-    mix = fetch_generation_mix()
+    price = fetch_smard_price()          # SMARD day-ahead price -> target
+    forecasts = fetch_smard_forecasts()  # day-ahead fundamentals, known before gate closure
 
-    df = load.join([weather, price, price_ec, forecasts, mix], how="left")
-    df = df.loc[df[config.TARGET].notna().idxmax():]  # trim leading all-NaN load
+    df = price.join(forecasts, how="left")
+    df = df.loc[df[config.PRICE_TARGET].notna().idxmax():]  # trim leading all-NaN price
 
     _check_residual_load(df)  # sanity-check the forecast fundamentals
 
     if save:
-        load.to_parquet(config.LOAD_PARQUET)
         df.to_parquet(config.DATASET_PARQUET)
         print(
             f"Saved {len(df):,} hourly rows "
