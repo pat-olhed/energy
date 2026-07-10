@@ -56,10 +56,12 @@ def backtest_price(
 
     One supervised set (not a horizon loop): the gate-closure features from
     `make_supervised_dayahead`. LightGBM is retrained every `step_hours` on a rolling
-    2-year window and scores the next block; the baselines (yesterday / last-week same
-    hour) are causal shifts valid for the day-ahead frame. Reports MAE and RMSE in
-    EUR/MWh (no MAPE — prices cross zero), MAE relative to the seasonal baseline, a
-    per-year regime table and a negative-price detection lens. Returns
+    2-year window and scores the next block; the baselines (yesterday, last-week same
+    hour, and the weekday-aware Lago combination) are causal shifts valid for the
+    day-ahead frame. Reports MAE and RMSE in EUR/MWh (no MAPE — prices cross zero), MAE
+    relative to the strongest naive baseline (daily persistence — 'yesterday', which
+    beats the weekday-aware Lago combination in this level-drifting market), a per-year
+    regime table and a negative-price detection lens. Returns
     (metrics, predictions, regime, negatives) and caches the artefacts if `save`.
     """
     from . import features, model
@@ -68,6 +70,7 @@ def backtest_price(
     price = df[config.PRICE_TARGET]
     naive = model.naive_forecast(price, 24).reindex(y.index)
     seasonal = model.seasonal_naive_forecast(price, 168).reindex(y.index)
+    lago = model.lago_naive_forecast(price).reindex(y.index)
 
     truth, lgbm_pred = [], []
     for train_idx, test_idx in rolling_origin_splits(
@@ -84,6 +87,7 @@ def backtest_price(
             "lightgbm": pd.concat(lgbm_pred),
             "naive": naive.reindex(yt.index),
             "seasonal_naive": seasonal.reindex(yt.index),
+            "lago_naive": lago.reindex(yt.index),
         }
     ).rename_axis("timestamp")
 
@@ -95,7 +99,7 @@ def backtest_price(
     preds["ee_share"] = ee.reindex(preds.index).clip(lower=0, upper=1)
 
     metric_rows = []
-    for name in ("lightgbm", "naive", "seasonal_naive"):
+    for name in ("lightgbm", "naive", "seasonal_naive", "lago_naive"):
         valid = preds["y_true"].notna() & preds[name].notna()
         sub = preds.loc[valid]
         metric_rows.append(
@@ -106,8 +110,8 @@ def backtest_price(
             }
         )
     metrics = pd.DataFrame(metric_rows)
-    base_mae = metrics.set_index("model").loc["seasonal_naive", "MAE"]
-    metrics["MAE_vs_seasonal_%"] = (100 * (1 - metrics["MAE"] / base_mae)).round(1)
+    base_mae = metrics.set_index("model").loc["naive", "MAE"]
+    metrics["MAE_vs_naive_%"] = (100 * (1 - metrics["MAE"] / base_mae)).round(1)
 
     regime = _price_regime_table(preds)
     negatives = _negative_price_scores(preds)
@@ -129,7 +133,7 @@ def _price_regime_table(preds: pd.DataFrame) -> pd.DataFrame:
     rows = []
     for year, g in p.groupby("year"):
         row = {"year": int(year), "n": len(g)}
-        for name in ("lightgbm", "naive", "seasonal_naive"):
+        for name in ("lightgbm", "naive", "seasonal_naive", "lago_naive"):
             row[f"MAE_{name}"] = round(mae(g["y_true"], g[name]), 2)
         rows.append(row)
     return pd.DataFrame(rows)

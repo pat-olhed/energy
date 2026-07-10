@@ -80,6 +80,21 @@ def test_baselines_are_plain_shifts():
     assert model.naive_forecast(y, 48).iloc[200] == y.iloc[200 - 48]
 
 
+def test_lago_naive_switches_on_weekday():
+    # two full weeks starting Monday 2022-05-02 (Mon=0 … Sun=6 in dayofweek)
+    idx = pd.date_range("2022-05-02", periods=14 * 24, freq="h", tz=config.TZ)
+    y = pd.Series(np.arange(len(idx), dtype=float), index=idx)
+    lago = model.lago_naive_forecast(y)
+
+    # Tue–Fri pull yesterday (shift 24h)
+    wed = pd.Timestamp("2022-05-11 10:00", tz=config.TZ)  # Wednesday, week 2
+    assert lago.loc[wed] == y.loc[wed - pd.Timedelta(hours=24)]
+    # Mon/Sat/Sun pull the same hour last week (shift 168h)
+    for day in ("2022-05-09", "2022-05-14", "2022-05-15"):  # Mon / Sat / Sun, week 2
+        tau = pd.Timestamp(f"{day} 10:00", tz=config.TZ)
+        assert lago.loc[tau] == y.loc[tau - pd.Timedelta(hours=168)]
+
+
 def test_rolling_origin_splits_no_overlap_and_expanding():
     idx = pd.date_range("2022-01-01", periods=1000, freq="h", tz=config.TZ)
     folds = list(

@@ -34,6 +34,22 @@ def seasonal_naive_forecast(y: pd.Series, season_hours: int = 168) -> pd.Series:
     return y.shift(season_hours)
 
 
+def lago_naive_forecast(y: pd.Series) -> pd.Series:
+    """Weekday-aware naive baseline (Lago et al. 2021) — the canonical EPF benchmark.
+
+    The standard reference in day-ahead price forecasting predicts the same hour of the
+    most representative recent settled day: on Tue–Fri that is *yesterday* (shift 24h);
+    on Mon/Sat/Sun — the days that break the weekly rhythm, where yesterday is a poor
+    guide — it is the *same hour last week* (shift 168h). Combining the two shifts on a
+    weekday switch beats either single shift alone, so it is the hardest fair reference
+    a learned model must clear. Both shifts are whole days, so the reference is always a
+    fully settled day-ahead price vector, known before gate closure.
+    """
+    # target-time weekday: Mon=0 … Sun=6; Tue–Fri (1–4) take yesterday, the rest last week
+    use_yesterday = pd.Series(y.index.dayofweek, index=y.index).isin([1, 2, 3, 4])
+    return y.shift(24).where(use_yesterday, y.shift(168))
+
+
 def default_lgbm_params() -> dict:
     """Sensible, unfussy defaults. Tuning is not the point of this project."""
     return dict(
