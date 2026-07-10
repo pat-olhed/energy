@@ -46,7 +46,7 @@ def load_predictions() -> pd.DataFrame | None:
 st.title("⚡ Day-Ahead-Strompreisprognose — DE/LU")
 st.caption(
     "SMARD Day-Ahead-Preis + Prognose-Fundamentaldaten · eine Prognose je Tag zum "
-    "Gate Closure (12:00 am Vortag) für alle 24 Stunden · LightGBM vs. saisonal-naive Baseline"
+    "Gate Closure (12:00 am Vortag) für alle 24 Stunden · LightGBM vs. naive Baseline (Tagespersistenz)"
 )
 
 preds = load_predictions()
@@ -64,8 +64,8 @@ if preds is None or metrics is None:
 m = metrics.set_index("model")
 c1, c2, c3 = st.columns(3)
 c1.metric("LightGBM MAE", eur(m.loc["lightgbm", "MAE"]))
-c2.metric("Saisonal-naiv MAE", eur(m.loc["seasonal_naive", "MAE"]))
-c3.metric("Verbesserung ggü. Baseline", pct(m.loc["lightgbm", "MAE_vs_seasonal_%"]), "weniger Fehler")
+c2.metric("Naiv (gestern) MAE", eur(m.loc["naive", "MAE"]))
+c3.metric("Verbesserung ggü. Baseline", pct(m.loc["lightgbm", "MAE_vs_naive_%"]), "weniger Fehler")
 
 # --- sidebar: time window --------------------------------------------------
 st.sidebar.header("Steuerung")
@@ -77,8 +77,8 @@ start_day, end_day = st.sidebar.slider(
 
 # --- forecast vs actual ----------------------------------------------------
 st.subheader("Prognose vs. Ist")
-window = preds.loc[str(start_day):str(end_day), ["y_true", "lightgbm", "seasonal_naive"]].rename(
-    columns={"y_true": "Ist-Preis", "lightgbm": "LightGBM", "seasonal_naive": "saisonal-naiv"}
+window = preds.loc[str(start_day):str(end_day), ["y_true", "lightgbm", "naive"]].rename(
+    columns={"y_true": "Ist-Preis", "lightgbm": "LightGBM", "naive": "naiv (gestern)"}
 )
 st.line_chart(window, height=380, y_label="Preis (€/MWh)")
 
@@ -111,11 +111,11 @@ col_a, col_b = st.columns(2)
 if regime is not None:
     col_a.subheader("MAE nach Jahr / Regime")
     reg = regime.rename(
-        columns={"year": "Jahr", "MAE_lightgbm": "LightGBM", "MAE_seasonal_naive": "saisonal-naiv"}
+        columns={"year": "Jahr", "MAE_lightgbm": "LightGBM", "MAE_naive": "naiv (gestern)"}
     )
     reg["Jahr"] = reg["Jahr"].astype(int).astype(str)  # categorical -> clean horizontal labels
     reg = reg.set_index("Jahr")
-    col_a.bar_chart(reg[["LightGBM", "saisonal-naiv"]], height=300, y_label="MAE (€/MWh)", stack=False)
+    col_a.bar_chart(reg[["LightGBM", "naiv (gestern)"]], height=300, y_label="MAE (€/MWh)", stack=False)
     col_a.caption("2022 = Gaskrise (schwerstes Jahr) → Normalisierung ab 2023.")
 
 # negative-price lens recomputed from preds (no model needed)

@@ -19,10 +19,11 @@ verkleinert das Risiko im kurzfristigen Handel. Besonders wertvoll sind die Extr
 **negative Preise** (Überschuss aus Wind/PV) und **Preisspitzen** in knappen Stunden — die
 Momente, in denen sich eine gute Prognose in Euro auszahlt.
 
-**Ergebnis vorweg:** Über 5,5 Jahre rollierenden Backtest senkt das Modell den mittleren
-absoluten Fehler von **45,2 €/MWh** (saisonal-naiv) auf **21,4 €/MWh** — eine Reduktion um
-**52,8 %**, und es schlägt die Baseline in **jedem** Jahr, auch im Gaskrisenjahr 2022.
-Negative Preisstunden erkennt es mit **79 % Precision bei 61 % Recall**.
+**Ergebnis vorweg:** Über den rollierenden Backtest (2022–2026) senkt das Modell den
+mittleren absoluten Fehler der stärksten naiven Baseline (Tagespersistenz „gestern") von
+**34,1 €/MWh** auf **21,4 €/MWh** — eine Reduktion um **37,4 %**, und es schlägt jede naive
+Baseline in **jedem** Jahr, auch im Gaskrisenjahr 2022. Negative Preisstunden erkennt es mit
+**79 % Precision bei 61 % Recall**.
 
 ## Prognose-Rahmen: Gate Closure & Leckagefreiheit
 
@@ -82,9 +83,12 @@ Zusammenführen liegen in [`src/data.py`](src/data.py).
    über die Zeit, Verteilung und Preisdauerlinie, das **Merit-Order-Streudiagramm** (Preis
    vs. Residuallast, eingefärbt nach EE-Anteil), Negativpreise nach Jahr/Stunde, die
    wandernde Duck-Curve und Autokorrelation. Jeder Schritt ist begründet dokumentiert.
-2. **Baselines** — Tagespersistenz (gestern, gleiche Stunde) und **saisonal-naiv** (letzte
-   Woche, gleiche Stunde). Beide sind reine kausale Shifts und für den Day-Ahead-Rahmen
-   gültig.
+2. **Baselines** — drei rein kausale Shifts, alle für den Day-Ahead-Rahmen gültig:
+   Tagespersistenz (gestern, gleiche Stunde), saisonal-naiv (letzte Woche, gleiche Stunde)
+   und die wochentagsabhängige **Lago-Baseline** (Lago et al. 2021; Di–Fr „gestern",
+   Mo/Sa/So „letzte Woche"), der Literaturstandard der Strompreisprognose. Berichtet wird
+   gegen die **empirisch stärkste** — hier die Tagespersistenz, die die Lago-Kombination in
+   diesem niveau-driftenden Markt sogar schlägt (Details unter *Ergebnisse*).
 3. **Gate-Closure-Features** — `make_supervised_dayahead` baut die (X, y)-Matrix indiziert
    nach Lieferstunde, mit der oben beschriebenen Semantik (Fundamental-Prognosen zu τ,
    Preishistorie um ganze Tage verschoben, Kalender von τ).
@@ -92,26 +96,32 @@ Zusammenführen liegen in [`src/data.py`](src/data.py).
    **rollierender Backtest (rolling origin)**, niemals ein zufälliger Split. LightGBM wird
    monatlich auf einem rollierenden Zwei-Jahres-Fenster neu trainiert und auf dem Folgemonat
    bewertet; die Baselines werden auf **exakt denselben** Zeitstempeln gemessen. Metriken:
-   MAE und RMSE in €/MWh plus MAE relativ zur Baseline — **kein MAPE**, weil Preise die Null
-   kreuzen und negativ werden.
+   MAE und RMSE in €/MWh plus MAE-Reduktion relativ zur stärksten naiven Baseline — **kein
+   MAPE**, weil Preise die Null kreuzen und negativ werden.
 
 ## Ergebnisse
 
 Rollierender Backtest über 2022–2026 (monatliches Neutraining, Zwei-Jahres-Fenster; die
 Daten reichen bis 2021 zurück, das erste Trainingsfenster verbraucht das erste Jahr).
-LightGBM schlägt die starke saisonal-naive Baseline klar und über alle Regime hinweg.
+Referenz ist die **stärkste** naive Baseline — die Tagespersistenz („gestern"). Sie schlägt
+nicht nur die saisonal-naive, sondern auch die wochentagsabhängige **Lago-Baseline**: In
+einem so **niveau-driftenden** Markt (Gaskrise) kostet der 7-Tage-Rückgriff an Mo/Sa/So mehr,
+als sein Wochentags-Vorteil einbringt. LightGBM schlägt alle drei klar und über alle Regime.
 
-| Modell | MAE (€/MWh) | RMSE (€/MWh) | MAE-Reduktion |
+| Modell | MAE (€/MWh) | RMSE (€/MWh) | ggü. „gestern" |
 | --- | ---: | ---: | ---: |
-| **LightGBM** | **21,4** | **35,0** | **−52,8 %** |
-| naiv (gestern) | 34,1 | 54,0 | −24,5 % |
-| saisonal-naiv | 45,2 | 70,7 | — |
+| **LightGBM** | **21,4** | **35,0** | **−37,4 %** |
+| naiv („gestern") — Referenz | 34,1 | 54,0 | — |
+| Lago (wochentagsabhängig) | 36,5 | 58,1 | +6,9 % |
+| saisonal-naiv | 45,2 | 70,7 | +32,5 % |
+
+(Negativ = weniger Fehler als die Referenz.)
 
 Die ehrliche Regime-Story, die nur ein rollierender Backtest abbildet: 2022 (Gaskrise) ist
 mit Abstand das schwerste Jahr, danach normalisieren sich Niveau und Fehler — aber das
 Modell schlägt die Baseline in **jedem** Jahr.
 
-![MAE nach Jahr — LightGBM vs. saisonal-naiv](reports/price_mae_by_year.png)
+![MAE nach Jahr — LightGBM vs. naiv (gestern)](reports/price_mae_by_year.png)
 
 - **Merit-Order bestätigt:** In der Feature-Importance dominiert die
   **Residuallast-Prognose** (~56 % Gain), gefolgt von der Preishistorie (~27 %, das
