@@ -1,15 +1,15 @@
 # Deployment der Streamlit-App
 
-Die App wird kostenlos auf der **Streamlit Community Cloud** gehostet, damit sie über
-einen Link ohne lokales Setup erreichbar ist. Sie lädt zur Laufzeit nur die
-eingecheckten Backtest-Ergebnisse (`data/processed/backtest_results.parquet` und
-`backtest_metrics.csv`) und importiert lediglich `pandas`, `streamlit` und `src.config`
-— kein Datenabruf, kein LightGBM zur Laufzeit.
+Die App wird kostenlos auf der **Streamlit Community Cloud** gehostet, damit sie über einen
+Link ohne lokales Setup erreichbar ist. Sie lädt zur Laufzeit nur die eingecheckten
+Preis-Backtest-Ergebnisse (`data/processed/price_backtest_results.parquet`,
+`price_backtest_metrics.csv` und `price_backtest_regime.csv`) und importiert lediglich
+`pandas`, `streamlit` und `src.config` — kein Datenabruf, kein LightGBM zur Laufzeit.
 
 ## Voraussetzungen
 
 - Öffentliches GitHub-Repo (hier `github.com/pat-olhed/energy`).
-- Die beiden Backtest-Artefakte sind eingecheckt (die `.gitignore` lässt genau diese zwei
+- Die drei Preis-Backtest-Artefakte sind eingecheckt (die `.gitignore` lässt genau diese
   Dateien zu). Ohne sie zeigt die App den Hinweis, den Backtest erst zu bauen.
 - `requirements.txt` liegt im Repo-Wurzelverzeichnis.
 
@@ -35,5 +35,5 @@ Jeder Push auf `main` deployt automatisch neu. Ändern sich die Backtest-Ergebni
 
 ## Hinweis
 
-Die App zeigt ausschließlich offene Marktdaten (SMARD, Open-Meteo, Energy-Charts); es
+Die App zeigt ausschließlich offene Marktdaten (SMARD Day-Ahead-Preis und -Prognosen); es
 werden keine Secrets oder personenbezogenen Daten benötigt oder eingecheckt.
