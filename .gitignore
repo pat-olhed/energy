@@ -10,9 +10,10 @@ __pycache__/
 data/raw/*
 data/processed/*
 !data/**/.gitkeep
-# keep the small backtest artifacts so the hosted app runs without a rebuild
-!data/processed/backtest_results.parquet
-!data/processed/backtest_metrics.csv
+# keep the small price-backtest artifacts so the hosted app runs without a rebuild
+!data/processed/price_backtest_results.parquet
+!data/processed/price_backtest_metrics.csv
+!data/processed/price_backtest_regime.csv
 
 # models / artifacts
 *.pkl
