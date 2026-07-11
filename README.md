@@ -7,9 +7,10 @@ leckagefreie Evaluation gegen starke Baselines**: Ein Modell ist nur interessant
 es diese Baselines auf einem sauberen rollierenden Backtest tatsächlich schlägt.
 
 **▶️ Live-Demo: [energy-forecast-poh.streamlit.app](https://energy-forecast-poh.streamlit.app/)**
-— vier Seiten von konkret zu technisch: **die automatisch täglich erzeugte Preisprognose
-für den nächsten Tag**, wie gut sie im Rücktest abschneidet, was den Preis treibt, und die
-Methodik. Ohne Setup direkt im Browser.
+— vier Seiten von konkret zu technisch: **der täglich neu erzeugte Modelllauf für den
+aktuellen Tag** (ein Nachvollzug gegen den bereits realisierten Preis, kein Live-Forecast),
+wie gut das Modell im Rücktest abschneidet, was den Preis treibt, und die Methodik. Ohne
+Setup direkt im Browser.
 
 ## Worum es geht und warum es nützt
 
@@ -24,7 +25,8 @@ Momente, in denen sich eine gute Prognose in Euro auszahlt.
 Ergebnis der EPEX-Auktion) und Fundamental-Prognosen für Last, Wind und PV — aber **keine
 Preisprognose**. Der realisierte Preis ist hier das Label, das das Modell zum Gate Closure
 schätzt; die Fundamental-Prognosen sind seine Eingaben. Eine eigenständige Vorhersage des
-Preises selbst liefert weder SMARD noch ENTSO-E — genau diese Lücke füllt das Projekt.
+Preises selbst liefert weder SMARD noch ENTSO-E — genau hier setzt das Projekt an, mit einem
+leckagefrei evaluierten Preismodell zum Gate Closure.
 
 **Ergebnis vorweg:** Über den rollierenden Backtest (2022–2026) senkt das Modell den
 mittleren absoluten Fehler der stärksten naiven Baseline (Tagespersistenz „gestern") von
@@ -156,9 +158,10 @@ Die vollständigen Zahlen, die Prognose über die Dunkelflaute im Dezember 2024 
 
 ## App starten
 
-Die interaktive Streamlit-App führt in vier thematischen Seiten durch das Projekt — von der
-automatisch täglich erzeugten Prognose für den nächsten Tag über ihre Rücktest-Güte und die
-Preistreiber bis zur Methodik — das Schaustück des Projekts.
+Die interaktive Streamlit-App führt in vier thematischen Seiten durch das Projekt — vom
+täglich neu erzeugten Modelllauf für den aktuellen Tag (ein Nachvollzug gegen den realisierten
+Preis, siehe *Grenzen*) über die Rücktest-Güte und die Preistreiber bis zur Methodik — das
+Schaustück des Projekts.
 
 **Am einfachsten:** die gehostete Live-Demo oben anklicken (kein Setup nötig).
 
@@ -177,7 +180,7 @@ weiteren Datenabruf. Um die Pipeline komplett neu aufzubauen:
 ```bash
 python -m src.data              # SMARD-Preis + Prognosen holen -> data/processed/dataset.parquet
 python -m src.evaluate          # rollierender Backtest -> Preis-Metriken + Prognosen
-python scripts/make_forecast.py # Live-Prognose für den nächsten Tag -> latest_forecast.parquet
+python scripts/make_forecast.py # tägliche Modell-Rekonstruktion -> latest_forecast.parquet
 pytest                          # Leckage-/Backtest-Integritätstests
 ```
 
@@ -185,16 +188,23 @@ pytest                          # Leckage-/Backtest-Integritätstests
 
 ```
 src/            data.py · features.py · model.py · evaluate.py · config.py
-scripts/        make_forecast.py (tägliche Live-Prognose) · make_mae_plot.py
+scripts/        make_forecast.py (tägliche Modell-Rekonstruktion) · make_mae_plot.py
 notebooks/      03_price_eda.ipynb · 04_price_model.ipynb
-app/            streamlit_app.py + views/ (Multipage-Report: Morgen · Güte · Treiber · Methodik)
+app/            streamlit_app.py + views/ (Multipage-Report: Aktueller Tag · Güte · Treiber · Methodik)
 tests/          Gate-Closure-Leckage- und Backtest-Integritätstests
 data/           raw/ + processed/ (git-ignoriert; von src.data neu aufgebaut)
-.github/        workflows/forecast.yml (aktualisiert die Live-Prognose täglich)
+.github/        workflows/forecast.yml (erzeugt die tägliche Rekonstruktion neu)
 ```
 
 ## Grenzen und nächste Schritte
 
+- **Der Live-Betrieb ist ein Nachvollzug, kein Vorab-Forecast.** SMARD stellt die vollständigen
+  Day-Ahead-Fundamentalprognosen für den Folgetag erst am **Abend des Vortags** bereit — nach dem
+  12:00-Gate-Closure, zu dem die Auktion die Preise bereits fixiert. Ein token-freier Live-Forecast
+  *vor* der Auktion ist damit nicht möglich; der täglich deployte Lauf rekonstruiert deshalb den
+  jüngsten, bereits geräumten Tag und prüft sich sofort am realisierten Preis. Die belastbare Güte
+  stammt aus dem Backtest; ein echter Vorab-Forecast über die ENTSO-E-Transparenzdaten (definierte
+  Veröffentlichungszeiten) wäre der nächste Schritt.
 - **Prognose-Vintage nicht aus dem Archiv rekonstruierbar.** Als Fundamentaldaten dienen SMARDs
   **Day-Ahead**-Prognosen — bewusst nicht die Intraday-Prognosen, die erst am Liefertag (~08:00)
   aktualisiert werden und deren Nutzung Leckage wäre. Die Day-Ahead-Werte werden am Vortag von
