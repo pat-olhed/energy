@@ -14,6 +14,9 @@ data/processed/*
 !data/processed/price_backtest_results.parquet
 !data/processed/price_backtest_metrics.csv
 !data/processed/price_backtest_regime.csv
+# keep the live forecast + its rolling history (refreshed daily by the forecast workflow)
+!data/processed/latest_forecast.parquet
+!data/processed/forecast_history.parquet
 
 # models / artifacts
 *.pkl
