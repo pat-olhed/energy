@@ -159,10 +159,90 @@ def _negative_price_scores(preds: pd.DataFrame, model_col: str = "lightgbm") -> 
     }
 
 
+def _newey_west_lrv(d: np.ndarray, n_lags: int) -> float:
+    """Long-run variance of d_t via the Newey-West (Bartlett-kernel) HAC estimator.
+
+    The plain sample variance assumes independent draws, but day-ahead price errors
+    persist across days (a gas-price regime lingers for weeks), so consecutive loss
+    differentials are correlated. Summing the autocovariances up to `n_lags` with
+    Bartlett weights that taper linearly to zero corrects for that — without it the
+    standard error is understated and everything looks falsely significant.
+    """
+    n = len(d)
+    d = d - d.mean()
+    lrv = float(d @ d) / n                       # gamma_0
+    for k in range(1, n_lags + 1):
+        weight = 1.0 - k / (n_lags + 1)          # Bartlett taper
+        gamma_k = float(d[k:] @ d[:-k]) / n
+        lrv += 2.0 * weight * gamma_k
+    return lrv
+
+
+def diebold_mariano(loss_a, loss_b, n_lags: int | None = None) -> dict:
+    """Diebold-Mariano test: is forecast A's loss significantly below B's?
+
+    Operates on any paired loss series. H0: equal expected loss, E[d_t] = 0 with
+    d_t = loss_a − loss_b; a negative mean favours A. The standard error is HAC
+    (Newey-West) so serial correlation does not inflate significance, and the statistic
+    is read against a t distribution with n−1 df (the Harvey-Leybourne-Newbold
+    small-sample stance). Returns the statistic and a two-sided p-value.
+    """
+    from scipy import stats
+
+    d = np.asarray(loss_a, dtype=float) - np.asarray(loss_b, dtype=float)
+    d = d[~np.isnan(d)]
+    n = len(d)
+    if n_lags is None:
+        n_lags = int(np.floor(4 * (n / 100) ** (2 / 9)))     # standard automatic bandwidth
+    dbar = float(d.mean())
+    var_dbar = _newey_west_lrv(d, n_lags) / n
+    if var_dbar <= 0:                                         # degenerate: identical losses
+        dm = 0.0 if abs(dbar) < 1e-12 else np.sign(dbar) * np.inf
+    else:
+        dm = dbar / np.sqrt(var_dbar)
+    p_value = float(2 * stats.t.cdf(-abs(dm), df=n - 1)) if np.isfinite(dm) else 0.0
+    return {
+        "dm_stat": round(float(dm), 3) if np.isfinite(dm) else float(dm),
+        "p_value": p_value,
+        "mean_loss_diff": round(dbar, 4),
+        "n": n,
+        "n_lags": n_lags,
+    }
+
+
+def dm_daily(preds: pd.DataFrame, model_a: str = "lightgbm", model_b: str = "naive") -> dict:
+    """Day-aggregated ('multivariate') DM test in the style of Lago et al. (2021).
+
+    Collapse the 24 hourly absolute errors of each gate-closure origin into one daily
+    MAE per model, then run the DM test on the two daily-MAE series. Aggregating by
+    forecast origin (the day) is the honest unit here: all 24 prices are one joint
+    auction outcome, not 24 independent forecasts, so their errors must not be counted
+    as separate observations.
+    """
+    p = preds.dropna(subset=["y_true", model_a, model_b])
+    err = pd.DataFrame(
+        {
+            model_a: (p[model_a] - p["y_true"]).abs(),
+            model_b: (p[model_b] - p["y_true"]).abs(),
+        }
+    )
+    daily = err.groupby(p.index.normalize()).mean()
+    res = diebold_mariano(daily[model_a], daily[model_b])
+    res["model_a"], res["model_b"], res["n_days"] = model_a, model_b, res.pop("n")
+    return res
+
+
 if __name__ == "__main__":
     frame = pd.read_parquet(config.DATASET_PARQUET)
-    metrics, _, regime, negatives = backtest_price(frame)
+    metrics, preds, regime, negatives = backtest_price(frame)
     print(metrics.to_string(index=False))
     print()
     print(regime.to_string(index=False))
     print("\nnegative-price lens:", negatives)
+    dm = dm_daily(preds, "lightgbm", "naive")
+    verdict = "significant" if dm["p_value"] < 0.05 else "not significant"
+    print(
+        f"\nDiebold-Mariano (daily MAE, LightGBM vs. naive, {dm['n_days']} days, "
+        f"{dm['n_lags']} HAC lags): stat={dm['dm_stat']}, p={dm['p_value']:.3g} "
+        f"({verdict}; negative stat => LightGBM better)"
+    )

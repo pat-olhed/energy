@@ -115,3 +115,21 @@ def test_metrics_zero_on_perfect_prediction():
     y = np.array([1.0, 2.0, 3.0, 4.0])
     assert evaluate.mae(y, y) == 0
     assert evaluate.rmse(y, y) == 0
+
+
+def test_diebold_mariano_flags_better_and_ignores_ties():
+    rng = np.random.default_rng(0)
+    n = 400
+    # identical loss series: no difference to detect -> stat 0, clearly non-significant
+    loss = rng.random(n)
+    tie = evaluate.diebold_mariano(loss, loss.copy())
+    assert tie["dm_stat"] == 0.0
+    assert tie["p_value"] > 0.99
+
+    # forecast A's loss is consistently ~0.5 below B's (plus small noise): A wins, and
+    # the negative sign convention (A − B < 0 favours A) must hold with a tiny p-value.
+    loss_a = rng.random(n)
+    loss_b = loss_a + 0.5 + 0.05 * rng.standard_normal(n)
+    res = evaluate.diebold_mariano(loss_a, loss_b)
+    assert res["dm_stat"] < 0          # A better
+    assert res["p_value"] < 0.01       # and significantly so
