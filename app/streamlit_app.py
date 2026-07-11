@@ -24,10 +24,11 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-from views import methodik, morgen, treiber, wie_gut  # noqa: E402
+from views import methodik, morgen, treiber, ueberblick, wie_gut  # noqa: E402
 
 pages = [
-    st.Page(morgen.render, title="Morgen", icon="🔮", url_path="morgen", default=True),
+    st.Page(ueberblick.render, title="Überblick", icon="🗺️", url_path="ueberblick", default=True),
+    st.Page(morgen.render, title="Morgen", icon="🔮", url_path="morgen"),
     st.Page(wie_gut.render, title="Wie gut ist die Prognose?", icon="📊", url_path="guete"),
     st.Page(treiber.render, title="Was treibt den Preis?", icon="⚙️", url_path="treiber"),
     st.Page(methodik.render, title="Methodik", icon="🔬", url_path="methodik"),
