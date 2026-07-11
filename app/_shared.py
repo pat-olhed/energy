@@ -78,6 +78,10 @@ def forecast_history():
     return load_parquet("forecast_history.parquet")
 
 
+def feature_importance():
+    return load_csv("feature_importance.csv")
+
+
 def model_mae():
     """LightGBM's backtest MAE — the honest error band for the (unlabelled) live forecast."""
     m = metrics()

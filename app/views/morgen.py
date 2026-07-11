@@ -1,104 +1,96 @@
-"""Landing page: the live day-ahead forecast for the next auctioned day, in plain
-language, plus the growing live track record."""
+"""Live forecast for the next auctioned day, plus the growing live track record."""
 import pandas as pd
 import streamlit as st
 
 import _shared as sh
 
 
-def _plain_language_read(fc: pd.DataFrame) -> str:
-    """A sentence or two, generated from the numbers, that a non-technical reader gets."""
+def _read(fc: pd.DataFrame) -> str:
+    """A short, factual read of the day's curve, generated from the numbers."""
     lg = fc["lightgbm"]
     cheap, dear = lg.idxmin(), lg.idxmax()
     parts = [
-        f"Am günstigsten wird Strom voraussichtlich gegen **{cheap:%H}:00 Uhr** "
-        f"({sh.eur(lg.min())}), am teuersten gegen **{dear:%H}:00 Uhr** ({sh.eur(lg.max())})."
+        f"Preisminimum gegen **{cheap:%H}:00 Uhr** ({sh.eur(lg.min())}), Maximum gegen "
+        f"**{dear:%H}:00 Uhr** ({sh.eur(lg.max())})."
     ]
     if lg.min() < 0:
         neg = int((lg < 0).sum())
         parts.append(
-            f"In {neg} Stunden rutscht der Preis sogar **unter null**: dann liefern Sonne "
-            "und Wind mehr Strom, als gebraucht wird — Abnehmer bekommen kurzzeitig Geld "
-            "dafür, dass sie verbrauchen. Genau solche Stunden sind für Speicher und "
-            "flexible Verbraucher bares Geld wert."
+            f"In {neg} Stunden liegt der Preis im **negativen** Bereich: hohe "
+            "Erneuerbaren-Einspeisung bei niedriger Last drückt ihn unter null — relevant "
+            "für Speicher und flexible Lasten, die dann Abnahmeprämien erzielen."
         )
     else:
         parts.append(
-            "Der typische Tagesverlauf: morgens und abends teuer (hohe Nachfrage, wenig "
-            "Sonne), mittags günstiger, wenn die Photovoltaik einspeist."
+            "Typischer Tagesverlauf mit Morgen- und Abendspitze und einer Mittagssenke "
+            "durch die Photovoltaik-Einspeisung."
         )
     return " ".join(parts)
 
 
 def render():
-    st.title("🔮 Strompreis für morgen")
+    st.title("🔮 Prognose für den nächsten Tag")
 
     fc = sh.latest_forecast()
     if fc is None:
-        st.info(
-            "Es liegt noch keine aktuelle Prognose vor. Sie wird täglich automatisch "
-            "erzeugt — lokal mit `python scripts/make_forecast.py`."
-        )
+        st.info("Es liegt noch keine Prognose vor. Erzeugung lokal über `python scripts/make_forecast.py`.")
         return
 
     day = fc.index.normalize()[0]
     settled = fc["y_true"].notna().all()
     created = pd.Timestamp(fc["created_at"].iloc[0])
-    st.caption(
-        f"Automatisch erzeugt am {created:%d.%m.%Y um %H:%M} UTC · "
-        "Großhandelspreis Deutschland/Luxemburg"
-    )
+    st.caption(f"Automatisch erzeugt am {created:%d.%m.%Y um %H:%M} UTC · Großhandelspreis DE/LU")
 
     st.write(
-        "Was kostet eine Megawattstunde Strom an der Börse — Stunde für Stunde? "
-        "Diese Prognose entsteht **automatisch jeden Tag**, genau in dem Moment, in dem "
-        "die Strombörse die Preise für den nächsten Tag festlegt (das sogenannte *Gate "
-        "Closure*, 12:00 Uhr am Vortag). Das Modell nutzt dabei nur Informationen, die zu "
-        "diesem Zeitpunkt schon bekannt sind — vor allem die Wetter- und Verbrauchs­"
-        "prognosen für den Zieltag. So bleibt die Vorhersage ehrlich: kein Blick in Daten, "
-        "die es zum Prognosezeitpunkt noch gar nicht gab."
+        "Erstellung einer vollständigen 24-Stunden-Preisprognose zum Gate Closure — dem "
+        "Zeitpunkt (12:00 Uhr am Vortag), zu dem die Day-Ahead-Auktion alle Stundenpreise "
+        "des Folgetags fixiert. Verwendet werden ausschließlich zu diesem Zeitpunkt bekannte "
+        "Größen, insbesondere SMARDs Vor-Gate-Prognosen für Last, Wind und PV. Die "
+        "Vorhersage bleibt damit leckagefrei, ohne Rückgriff auf erst danach entstehende Daten."
     )
 
-    # honest status: is this a real forward forecast, or an already-settled verification?
     if settled:
         mae = (fc["lightgbm"] - fc["y_true"]).abs().mean()
         st.success(
-            f"**Prognose für {sh.de_date(day)}** — die Börsenauktion ist bereits geräumt, "
-            f"die tatsächlichen Preise liegen vor. Das Modell lag im Schnitt "
-            f"**{sh.eur(mae)}** daneben."
+            f"**{sh.de_date(day)}** — Auktion geräumt, realisierte Preise liegen vor. "
+            f"Mittlerer absoluter Fehler des Modells an diesem Tag: **{sh.eur(mae)}**."
+        )
+        st.caption(
+            "Zur Prognose des Folgetags: Wichtigster Eingang ist die Residuallast-Prognose "
+            "(Last minus Wind und PV). SMARD veröffentlicht sie für den Folgetag erst am "
+            "Abend des Vortags — bis dahin ist der letzte vollständig prognostizierbare Tag "
+            "der hier gezeigte. Mit Vorliegen der Residuallast-Prognose verschiebt sich die "
+            "Vorhersage automatisch auf den Folgetag."
         )
     else:
         mm = sh.model_mae()
-        band = f" Typische Abweichung laut Langzeittest: **±{sh.eur(mm)}**." if mm else ""
+        band = f" Typische Abweichung laut Backtest: **±{sh.eur(mm)}**." if mm else ""
         st.info(
-            f"**Prognose für {sh.de_date(day)}** — die Auktion ist noch offen. Die "
-            f"Vorhersage lässt sich überprüfen, sobald der tatsächliche Preis vorliegt."
-            f"{band}"
+            f"**{sh.de_date(day)}** — Auktion noch offen; Überprüfung nach Vorliegen des "
+            f"realisierten Preises.{band}"
         )
 
     lg = fc["lightgbm"]
     cheap, dear = lg.idxmin(), lg.idxmax()
     c1, c2, c3 = st.columns(3)
-    c1.metric("Ø-Preis über den Tag", sh.eur(lg.mean()))
-    c2.metric(f"Günstigste Stunde · {cheap:%H}:00", sh.eur(lg.min()))
-    c3.metric(f"Teuerste Stunde · {dear:%H}:00", sh.eur(lg.max()))
+    c1.metric("Tagesmittel", sh.eur(lg.mean()))
+    c2.metric(f"Minimum · {cheap:%H}:00", sh.eur(lg.min()))
+    c3.metric(f"Maximum · {dear:%H}:00", sh.eur(lg.max()))
 
-    # the 24h curve — model vs. the simple rule of thumb, plus the actual once settled
     chart = pd.DataFrame(index=fc.index)
-    chart["Prognose (Modell)"] = fc["lightgbm"]
-    chart["Daumenregel: wie gestern"] = fc["naive"]
+    chart["Prognose (LightGBM)"] = fc["lightgbm"]
+    chart["naive Baseline (Vortag)"] = fc["naive"]
     colors = [sh.COL_LGBM, sh.COL_NAIVE]
     if settled:
-        chart["Tatsächlich eingetreten"] = fc["y_true"]
+        chart["realisiert"] = fc["y_true"]
         colors = [sh.COL_LGBM, sh.COL_NAIVE, sh.COL_IST]
     chart.index = chart.index.strftime("%H:%M")
     st.line_chart(chart, height=360, color=colors, y_label="Preis (€/MWh)", x_label="Uhrzeit")
 
-    st.markdown(_plain_language_read(fc))
+    st.markdown(_read(fc))
 
-    # the growing live track record — the real proof, once auctions settle
     st.divider()
-    st.subheader("Wie gut lagen die bisherigen Prognosen?")
+    st.subheader("Prognosegüte im Zeitverlauf")
     hist = sh.forecast_history()
     verified = None if hist is None else hist.dropna(subset=["y_true"])
     per_day = None
@@ -107,23 +99,16 @@ def render():
             (verified["lightgbm"] - verified["y_true"]).abs()
             .groupby(verified.index.normalize()).mean()
         )
-    # need at least two settled days before a track record says anything beyond the tile above
     if per_day is None or len(per_day) < 2:
         st.caption(
-            "Der Live-Track-Record baut sich täglich auf: Sobald mehrere automatisch "
-            "erzeugte Prognosen an der Börse geräumt sind, erscheint hier Prognose gegen "
-            "Wirklichkeit über die Zeit. Wie gut das Modell grundsätzlich trifft, zeigt "
-            "schon jetzt der Rückrechnungstest unter „Wie gut ist die Prognose?“."
+            "Der Live-Track-Record baut sich mit jedem geräumten Tag auf. Die systematische "
+            "Güte über mehrere Jahre zeigt der Backtest unter „Wie gut ist die Prognose?“."
         )
         return
     st.write(
-        f"Über die letzten **{len(per_day)}** automatisch erzeugten und inzwischen "
-        f"geräumten Tagesprognosen lag das Modell im Schnitt **{sh.eur(per_day.mean())}** "
-        "neben dem tatsächlichen Preis."
+        f"Mittlerer absoluter Fehler über die letzten **{len(per_day)}** live erzeugten und "
+        f"inzwischen geräumten Tagesprognosen: **{sh.eur(per_day.mean())}**."
     )
     recent = per_day.tail(14).copy()
     recent.index = recent.index.strftime("%d.%m.")
-    st.bar_chart(
-        recent.rename("Abweichung"), height=220, color=sh.COL_LGBM,
-        y_label="Ø-Abweichung (€/MWh)", x_label="Tag",
-    )
+    st.bar_chart(recent.rename("MAE"), height=220, color=sh.COL_LGBM, y_label="MAE (€/MWh)", x_label="Tag")
