@@ -17,6 +17,8 @@ data/processed/*
 # keep the live forecast + its rolling history (refreshed daily by the forecast workflow)
 !data/processed/latest_forecast.parquet
 !data/processed/forecast_history.parquet
+# keep the model's feature importances so the app renders the real chart
+!data/processed/feature_importance.csv
 
 # models / artifacts
 *.pkl

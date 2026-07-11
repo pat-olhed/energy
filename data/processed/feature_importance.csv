@@ -1,0 +1,20 @@
+label,group,importance_pct
+Residuallast-Prognose,Fundamentaldaten,55.89912415974085
+Preis Vortag (D-1),Preishistorie,12.497630570688212
+Wind-Prognose,Fundamentaldaten,6.633396060195541
+PV-Prognose,Fundamentaldaten,5.204381542498772
+Preis Vorwoche (D-7),Preishistorie,3.9697941867619106
+Vortag Streuung,Preishistorie,2.331606407528192
+Last-Prognose,Fundamentaldaten,2.04880092634062
+Preis D-2,Preishistorie,1.7396009908552985
+7-Tage-Mittel,Preishistorie,1.633629777827707
+Vortag Ø,Preishistorie,1.615848172637541
+Monat,Kalender,1.5955349802380667
+Vortag Minimum,Preishistorie,1.495359122197514
+Vortag Maximum,Preishistorie,1.393561966294835
+Wochentag,Kalender,0.8648062684003772
+Tageszeit (zyklisch),Kalender,0.4423911036943962
+Stunde,Kalender,0.30779174409924476
+Wochentag (zyklisch),Kalender,0.2978804729045547
+Wochenende,Kalender,0.014796049623130697
+Feiertag,Kalender,0.01406549747323477
