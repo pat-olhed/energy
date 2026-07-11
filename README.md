@@ -125,6 +125,17 @@ als sein Wochentags-Vorteil einbringt. LightGBM schlägt alle drei klar und übe
 
 (Negativ = weniger Fehler als die Referenz.)
 
+**Signifikanz, nicht nur ein Punktwert.** Ein **Diebold-Mariano-Test** prüft, ob der
+Abstand echt ist oder Rauschen. Getestet wird auf den **täglichen** MAE-Differenzen — der
+Tag ist die Prognose-Einheit, denn alle 24 Stundenpreise sind *ein* Auktionsergebnis, keine
+24 unabhängigen Prognosen (der multivariate DM-Test nach Lago et al. 2021) — mit
+**HAC-robustem** Standardfehler (Newey-West, gegen die Autokorrelation aufeinanderfolgender
+Tagesfehler; ohne diese Korrektur wäre jeder Test scheinbar signifikant). Ergebnis über 1.621
+Test-Tage: **DM ≈ −12,5, p ≈ 3·10⁻³⁴** — der Vorsprung vor „gestern" ist statistisch
+hochsignifikant, kein Zufall (gegen Lago und saisonal-naiv ebenso). Ein echter
+Terminmarkt-Maßstab (Futures-Erwartung statt Eigen-Baseline) bleibt bewusst offen — die
+EEX-Settlement-Historie ist nicht token-frei verfügbar.
+
 Die ehrliche Regime-Story, die nur ein rollierender Backtest abbildet: 2022 (Gaskrise) ist
 mit Abstand das schwerste Jahr, danach normalisieren sich Niveau und Fehler — aber das
 Modell schlägt die Baseline in **jedem** Jahr.
