@@ -95,6 +95,31 @@ def test_lago_naive_switches_on_weekday():
         assert lago.loc[tau] == y.loc[tau - pd.Timedelta(hours=168)]
 
 
+def test_make_features_for_day_future_day_without_target():
+    df = _price_frame(days=30, start="2022-05-01")
+
+    # an interior day: 24 rows, no NaN, byte-identical to the supervised X slice (so the
+    # forecaster feeds the model exactly what training saw — same columns, same leakage
+    # rules, which the supervised no-leak test already guards).
+    X_full, _ = features.make_supervised_dayahead(df)
+    day = pd.Timestamp("2022-05-20", tz=config.TZ)
+    X_day = features.make_features_for_day(df, day)
+    assert len(X_day) == 24
+    assert not X_day.isna().any().any()
+    same = X_full.loc[X_full.index.normalize() == day]
+    pd.testing.assert_frame_equal(X_day, same)
+
+    # future day: blank out the last day's price (not auctioned yet). The supervised
+    # builder drops those rows; the forecaster still returns them — that is the point.
+    last_day = df.index.normalize().max()
+    fut = df.copy()
+    fut.loc[fut.index.normalize() == last_day, config.PRICE_TARGET] = np.nan
+    X_fut = features.make_features_for_day(fut, last_day)
+    assert len(X_fut) == 24 and not X_fut.isna().any().any()
+    Xf, _ = features.make_supervised_dayahead(fut)
+    assert (Xf.index.normalize() == last_day).sum() == 0
+
+
 def test_rolling_origin_splits_no_overlap_and_expanding():
     idx = pd.date_range("2022-01-01", periods=1000, freq="h", tz=config.TZ)
     folds = list(

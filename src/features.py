@@ -26,14 +26,12 @@ def _cyclical(values, period: int):
     return np.sin(radians), np.cos(radians)
 
 
-def make_supervised_dayahead(df: pd.DataFrame, target: str = config.PRICE_TARGET):
-    """Build (X, y) for the day-ahead price, indexed by delivery hour τ on day D.
+def _build_features(df: pd.DataFrame, target: str) -> pd.DataFrame:
+    """Assemble the full gate-closure feature matrix indexed by delivery hour τ.
 
-    The day-ahead auction fixes all 24 prices of day D at once, at gate closure
-    (12:00 Europe/Berlin on D-1), so every feature must be known by then. The price
-    history is shifted by *whole days*: the reference always lands on D-1 or earlier,
-    whose price curves were cleared at previous auctions and are known at gate closure.
-    Feature groups:
+    This is the shared core of the supervised builder and the single-day forecaster: it
+    only *builds* features (no target join, no row dropping), so the exact same columns
+    and leakage rules serve both training and prediction. Feature groups:
 
       * fundamentals at τ — SMARD's own day-ahead forecasts (residual load, load, wind,
         PV), published the morning of D-1 (before gate closure), so taking their value
@@ -43,7 +41,6 @@ def make_supervised_dayahead(df: pd.DataFrame, target: str = config.PRICE_TARGET
         previous day's cleared curve (mean/min/max/std) plus a 7-day rolling daily mean,
         every one shifted by entire days so day D never enters;
       * calendar of τ (deterministic).
-    Rows with any missing value (series edges) are dropped.
     """
     price = df[target]
     tau = df.index
@@ -84,6 +81,49 @@ def make_supervised_dayahead(df: pd.DataFrame, target: str = config.PRICE_TARGET
     feat["is_holiday"] = _is_holiday(tau)
     feat["hour_sin"], feat["hour_cos"] = _cyclical(tau.hour, 24)
     feat["dow_sin"], feat["dow_cos"] = _cyclical(tau.dayofweek, 7)
+    return feat
 
+
+def make_supervised_dayahead(df: pd.DataFrame, target: str = config.PRICE_TARGET):
+    """Build (X, y) for the day-ahead price, indexed by delivery hour τ on day D.
+
+    The day-ahead auction fixes all 24 prices of day D at once, at gate closure
+    (12:00 Europe/Berlin on D-1), so every feature must be known by then (see
+    `_build_features` for the feature groups and the whole-day shift that keeps this
+    leakage-free). Rows with any missing value — target or feature, at the series edges
+    — are dropped, leaving the aligned training pair.
+    """
+    feat = _build_features(df, target)
+    price = df[target]
     data = feat.join(price.rename("__y__")).dropna()
     return data.drop(columns="__y__"), data["__y__"].rename(target)
+
+
+def make_features_for_day(
+    df: pd.DataFrame, day, target: str = config.PRICE_TARGET
+) -> pd.DataFrame:
+    """Leakage-free feature rows for the 24 delivery hours of a single target day D.
+
+    The forecasting counterpart to `make_supervised_dayahead`: it returns X only, so it
+    works for a *future* day whose price has not been auctioned yet (that whole-day
+    target column is still empty). `df` must carry enough history before D for the price
+    lags/aggregates (D-1/D-2/D-7) and SMARD's day-ahead forecast fundamentals for D
+    itself. Raises if any feature is missing for D — that means the fundamentals for the
+    day are not published yet, so no honest gate-closure forecast can be made.
+    """
+    day = pd.Timestamp(day)
+    if day.tzinfo is None:
+        day = day.tz_localize(config.TZ)
+    day = day.normalize()
+
+    feat = _build_features(df, target)
+    rows = feat.loc[feat.index.normalize() == day]
+    if rows.empty:
+        raise ValueError(f"no rows for target day {day.date()} — is it in the dataset index?")
+    if rows.isna().any().any():
+        missing = rows.columns[rows.isna().any()].tolist()
+        raise ValueError(
+            f"missing features for {day.date()} ({missing}); the day-ahead fundamentals "
+            "or price history for this day are not fully available yet."
+        )
+    return rows
