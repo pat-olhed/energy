@@ -79,7 +79,7 @@ def render():
 
     st.subheader("Aufbau der Anwendung")
     st.markdown(
-        "- **🔮 Morgen** — die automatisch täglich erzeugte Prognose für den nächsten Tag\n"
+        "- **📅 Aktueller Tag** — das Modell im Nachvollzug auf dem jüngsten geräumten Tag, plus Live-Track-Record\n"
         "- **📊 Wie gut ist die Prognose?** — Prognosegüte, Baselines und Signifikanz\n"
         "- **⚙️ Was treibt den Preis?** — Merit Order, Feature-Wichtigkeit, Negativpreise\n"
         "- **🔬 Methodik** — Gate-Closure-Framing, Leckagefreiheit, Backtest, DM-Test"

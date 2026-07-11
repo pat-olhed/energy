@@ -29,7 +29,7 @@ def _read(fc: pd.DataFrame) -> str:
 
 
 def render():
-    st.title("🔮 Prognose für den nächsten Tag")
+    st.title("📅 Der aktuelle Tag — Modell gegen Realität")
 
     fc = sh.latest_forecast()
     if fc is None:
@@ -42,32 +42,36 @@ def render():
     st.caption(f"Automatisch erzeugt am {created:%d.%m.%Y um %H:%M} UTC · Großhandelspreis DE/LU")
 
     st.write(
-        "Erstellung einer vollständigen 24-Stunden-Preisprognose zum Gate Closure — dem "
-        "Zeitpunkt (12:00 Uhr am Vortag), zu dem die Day-Ahead-Auktion alle Stundenpreise "
-        "des Folgetags fixiert. Verwendet werden ausschließlich zu diesem Zeitpunkt bekannte "
-        "Größen, insbesondere SMARDs Vor-Gate-Prognosen für Last, Wind und PV. Die "
-        "Vorhersage bleibt damit leckagefrei, ohne Rückgriff auf erst danach entstehende Daten."
+        "Diese Seite ist **kein Blick in die Zukunft**, sondern ein ehrlicher Nachvollzug: "
+        "Das Modell erhält ausschließlich die zum Gate Closure (12:00 Uhr am Vortag) "
+        "bekannten Größen — insbesondere SMARDs Vor-Gate-Prognosen für Last, Wind und PV — "
+        "und rekonstruiert daraus die 24 Stundenpreise. Gezeigt wird der jüngste Tag, für "
+        "den diese Prognosegrößen vollständig vorliegen."
+    )
+    st.write(
+        "Warum kein echter Vorab-Forecast? SMARD stellt die vollständigen "
+        "Fundamentalprognosen für den Folgetag erst **am Abend des Vortags** bereit — also "
+        "nach dem 12-Uhr-Gate-Closure, zu dem die Auktion die realen Preise bereits fixiert "
+        "hat. Ein token-freier Live-Forecast *vor* der Auktion ist damit nicht möglich. Die "
+        "belastbare, systematische Güte zeigt deshalb der **Backtest** über vier Jahre "
+        "(Seite „Wie gut ist die Prognose?“); der Einzeltag hier ist das anschauliche Beispiel."
     )
 
     if settled:
         mae = (fc["lightgbm"] - fc["y_true"]).abs().mean()
+        mm = sh.model_mae()
+        anchor = f" — der Backtest-Durchschnitt liegt bei **{sh.eur(mm)}**" if mm else ""
         st.success(
-            f"**{sh.de_date(day)}** — Auktion geräumt, realisierte Preise liegen vor. "
-            f"Mittlerer absoluter Fehler des Modells an diesem Tag: **{sh.eur(mae)}**."
-        )
-        st.caption(
-            "Zur Prognose des Folgetags: Wichtigster Eingang ist die Residuallast-Prognose "
-            "(Last minus Wind und PV). SMARD veröffentlicht sie für den Folgetag erst am "
-            "Abend des Vortags — bis dahin ist der letzte vollständig prognostizierbare Tag "
-            "der hier gezeigte. Mit Vorliegen der Residuallast-Prognose verschiebt sich die "
-            "Vorhersage automatisch auf den Folgetag."
+            f"**{sh.de_date(day)}** — die Auktion ist geräumt, die realisierten Preise "
+            f"liegen vor. Mittlerer absoluter Fehler der Modell-Rekonstruktion an diesem "
+            f"Tag: **{sh.eur(mae)}**{anchor}."
         )
     else:
         mm = sh.model_mae()
         band = f" Typische Abweichung laut Backtest: **±{sh.eur(mm)}**." if mm else ""
         st.info(
-            f"**{sh.de_date(day)}** — Auktion noch offen; Überprüfung nach Vorliegen des "
-            f"realisierten Preises.{band}"
+            f"**{sh.de_date(day)}** — der realisierte Preis liegt noch nicht vor; sobald "
+            f"die Auktion geräumt ist, wird die Rekonstruktion hier daran gemessen.{band}"
         )
 
     lg = fc["lightgbm"]
@@ -106,8 +110,8 @@ def render():
         )
         return
     st.write(
-        f"Mittlerer absoluter Fehler über die letzten **{len(per_day)}** live erzeugten und "
-        f"inzwischen geräumten Tagesprognosen: **{sh.eur(per_day.mean())}**."
+        f"Mittlerer absoluter Fehler über die letzten **{len(per_day)}** automatisch "
+        f"erzeugten und inzwischen geräumten Tagesrekonstruktionen: **{sh.eur(per_day.mean())}**."
     )
     recent = per_day.tail(14).copy()
     recent.index = recent.index.strftime("%d.%m.")

@@ -67,6 +67,21 @@ def render():
         "frei verfügbar)."
     )
 
+    st.subheader("5 · Backtest vs. Live — und eine offene Annahme")
+    st.write(
+        "Die belastbaren Zahlen oben stammen aus dem **Backtest**. Ein *echter* "
+        "Live-Forecast vor der Auktion ist token-frei nicht möglich: SMARD stellt die "
+        "vollständigen Fundamentalprognosen für den Folgetag erst am Abend des Vortags "
+        "bereit — nach dem 12-Uhr-Gate-Closure, zu dem die Auktion die Preise längst "
+        "fixiert hat. Die Seite „Aktueller Tag“ ist deshalb ein **Nachvollzug** gegen den "
+        "bereits realisierten Preis, kein Blick in die Zukunft. Offen bleibt zudem die "
+        "**Vintage-Annahme**: SMARD liefert stets die jüngste Fassung einer Prognosereihe; "
+        "die Leckagefreiheit hält streng nur, wenn diese der zum Gate Closure bekannten "
+        "ex-ante-Fassung entspricht. Ein echter Vorab-Forecast — etwa über die "
+        "ENTSO-E-Transparenzdaten mit definierten Veröffentlichungszeiten — ist als "
+        "Erweiterung möglich."
+    )
+
     st.divider()
     st.write(
         "Der vollständige Bericht — Problem, Daten, Methode, Ergebnisse, Grenzen — steht "

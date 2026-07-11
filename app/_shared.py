@@ -83,6 +83,6 @@ def feature_importance():
 
 
 def model_mae():
-    """LightGBM's backtest MAE — the honest error band for the (unlabelled) live forecast."""
+    """LightGBM's backtest MAE — the honest error band for the daily reconstruction."""
     m = metrics()
     return None if m is None else m.set_index("model").loc["lightgbm", "MAE"]
