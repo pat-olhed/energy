@@ -1,0 +1,45 @@
+name: Daily forecast
+
+# Rebuild the live day-ahead forecast once a day and commit it back, which triggers a
+# Streamlit redeploy. Runs in the evening (Berlin), by which point SMARD has usually
+# published the renewable/residual-load forecasts for the next day; manual runs anytime.
+on:
+  schedule:
+    - cron: "0 20 * * *"   # 20:00 UTC ≈ 22:00 Europe/Berlin (CEST)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: daily-forecast
+  cancel-in-progress: false
+
+jobs:
+  forecast:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate the live forecast
+        run: python scripts/make_forecast.py
+
+      - name: Commit the updated forecast if it changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add data/processed/latest_forecast.parquet data/processed/forecast_history.parquet
+          if git diff --cached --quiet; then
+            echo "Forecast unchanged — nothing to commit."
+          else
+            git commit -m "Update live forecast ($(date -u +%Y-%m-%d))"
+            git push
+          fi

@@ -1,16 +1,18 @@
 # Deployment der Streamlit-App
 
 Die App wird kostenlos auf der **Streamlit Community Cloud** gehostet, damit sie über einen
-Link ohne lokales Setup erreichbar ist. Sie lädt zur Laufzeit nur die eingecheckten
-Preis-Backtest-Ergebnisse (`data/processed/price_backtest_results.parquet`,
-`price_backtest_metrics.csv` und `price_backtest_regime.csv`) und importiert lediglich
-`pandas`, `streamlit` und `src.config` — kein Datenabruf, kein LightGBM zur Laufzeit.
+Link ohne lokales Setup erreichbar ist. Sie ist als **Multipage-App** aufgebaut
+(`app/streamlit_app.py` + `app/views/`) und lädt zur Laufzeit nur eingecheckte Artefakte —
+den Preis-Backtest (`data/processed/price_backtest_*`) sowie die täglich aktualisierte
+Live-Prognose (`latest_forecast.parquet`, `forecast_history.parquet`). Sie importiert
+lediglich `pandas`, `streamlit` und `src.config` — kein Datenabruf, kein LightGBM zur Laufzeit.
 
 ## Voraussetzungen
 
 - Öffentliches GitHub-Repo (hier `github.com/pat-olhed/energy`).
-- Die drei Preis-Backtest-Artefakte sind eingecheckt (die `.gitignore` lässt genau diese
-  Dateien zu). Ohne sie zeigt die App den Hinweis, den Backtest erst zu bauen.
+- Die Backtest- und Live-Prognose-Artefakte sind eingecheckt (die `.gitignore` lässt genau
+  diese Dateien zu). Ohne sie zeigt die App den Hinweis, den Backtest bzw. die Prognose erst
+  zu bauen.
 - `requirements.txt` liegt im Repo-Wurzelverzeichnis.
 
 ## Schritte
@@ -30,8 +32,15 @@ Preis-Backtest-Ergebnisse (`data/processed/price_backtest_results.parquet`,
 
 ## Aktualisieren
 
-Jeder Push auf `main` deployt automatisch neu. Ändern sich die Backtest-Ergebnisse
-(`python -m src.evaluate`), die aktualisierten Artefakte einfach committen und pushen.
+Jeder Push auf `main` deployt automatisch neu.
+
+Die **Live-Prognose aktualisiert sich selbst**: Der Workflow `.github/workflows/forecast.yml`
+läuft täglich am Abend (nach Gate Closure), erzeugt die Prognose für den nächsten Tag neu
+(`python scripts/make_forecast.py`) und committet sie zurück — was den Redeploy auslöst.
+Manuell lässt er sich über *Actions → Daily forecast → Run workflow* anstoßen.
+
+Ändern sich die Backtest-Ergebnisse (`python -m src.evaluate`), die aktualisierten Artefakte
+einfach committen und pushen.
 
 ## Hinweis
 

@@ -7,8 +7,9 @@ leckagefreie Evaluation gegen starke Baselines**: Ein Modell ist nur interessant
 es diese Baselines auf einem sauberen rollierenden Backtest tatsächlich schlägt.
 
 **▶️ Live-Demo: [energy-forecast-poh.streamlit.app](https://energy-forecast-poh.streamlit.app/)**
-— Prognose vs. Ist, Merit-Order-Streudiagramm und die Metriken gegen die Baselines, ohne
-Setup direkt im Browser.
+— vier Seiten von konkret zu technisch: **die automatisch täglich erzeugte Preisprognose
+für den nächsten Tag**, wie gut sie im Rücktest abschneidet, was den Preis treibt, und die
+Methodik. Ohne Setup direkt im Browser.
 
 ## Worum es geht und warum es nützt
 
@@ -155,8 +156,9 @@ Die vollständigen Zahlen, die Prognose über die Dunkelflaute im Dezember 2024 
 
 ## App starten
 
-Die interaktive Streamlit-App zeigt „Prognose vs. Ist", das Merit-Order-Streudiagramm und
-die Metriken gegen die Baselines — das Schaustück des Projekts.
+Die interaktive Streamlit-App führt in vier thematischen Seiten durch das Projekt — von der
+automatisch täglich erzeugten Prognose für den nächsten Tag über ihre Rücktest-Güte und die
+Preistreiber bis zur Methodik — das Schaustück des Projekts.
 
 **Am einfachsten:** die gehostete Live-Demo oben anklicken (kein Setup nötig).
 
@@ -173,19 +175,22 @@ Die App liegt bereits mit den eingecheckten Backtest-Ergebnissen vor und startet
 weiteren Datenabruf. Um die Pipeline komplett neu aufzubauen:
 
 ```bash
-python -m src.data        # SMARD-Preis + Prognosen holen -> data/processed/dataset.parquet
-python -m src.evaluate    # rollierender Backtest -> Preis-Metriken + Prognosen
-pytest                    # Leckage-/Backtest-Integritätstests
+python -m src.data              # SMARD-Preis + Prognosen holen -> data/processed/dataset.parquet
+python -m src.evaluate          # rollierender Backtest -> Preis-Metriken + Prognosen
+python scripts/make_forecast.py # Live-Prognose für den nächsten Tag -> latest_forecast.parquet
+pytest                          # Leckage-/Backtest-Integritätstests
 ```
 
 ## Aufbau des Repos
 
 ```
 src/            data.py · features.py · model.py · evaluate.py · config.py
+scripts/        make_forecast.py (tägliche Live-Prognose) · make_mae_plot.py
 notebooks/      03_price_eda.ipynb · 04_price_model.ipynb
-app/            streamlit_app.py  (Prognose vs. Ist + Merit-Order + Metriken)
+app/            streamlit_app.py + views/ (Multipage-Report: Morgen · Güte · Treiber · Methodik)
 tests/          Gate-Closure-Leckage- und Backtest-Integritätstests
 data/           raw/ + processed/ (git-ignoriert; von src.data neu aufgebaut)
+.github/        workflows/forecast.yml (aktualisiert die Live-Prognose täglich)
 ```
 
 ## Grenzen und nächste Schritte
