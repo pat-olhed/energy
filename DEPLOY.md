@@ -3,16 +3,16 @@
 Die App wird kostenlos auf der **Streamlit Community Cloud** gehostet, damit sie über einen
 Link ohne lokales Setup erreichbar ist. Sie ist als **Multipage-App** aufgebaut
 (`app/streamlit_app.py` + `app/views/`) und lädt zur Laufzeit nur eingecheckte Artefakte —
-den Preis-Backtest (`data/processed/price_backtest_*`) sowie die täglich aktualisierte
-Live-Prognose (`latest_forecast.parquet`, `forecast_history.parquet`). Sie importiert
+den Preis-Backtest (`data/processed/price_backtest_*`) sowie die täglich neu erzeugte
+Modell-Rekonstruktion (`latest_forecast.parquet`, `forecast_history.parquet`). Sie importiert
 lediglich `pandas`, `streamlit` und `src.config` — kein Datenabruf, kein LightGBM zur Laufzeit.
 
 ## Voraussetzungen
 
 - Öffentliches GitHub-Repo (hier `github.com/pat-olhed/energy`).
-- Die Backtest- und Live-Prognose-Artefakte sind eingecheckt (die `.gitignore` lässt genau
-  diese Dateien zu). Ohne sie zeigt die App den Hinweis, den Backtest bzw. die Prognose erst
-  zu bauen.
+- Die Backtest- und Rekonstruktions-Artefakte sind eingecheckt (die `.gitignore` lässt genau
+  diese Dateien zu). Ohne sie zeigt die App den Hinweis, den Backtest bzw. die Rekonstruktion
+  erst zu bauen.
 - `requirements.txt` liegt im Repo-Wurzelverzeichnis.
 
 ## Schritte
@@ -34,10 +34,12 @@ lediglich `pandas`, `streamlit` und `src.config` — kein Datenabruf, kein Light
 
 Jeder Push auf `main` deployt automatisch neu.
 
-Die **Live-Prognose aktualisiert sich selbst**: Der Workflow `.github/workflows/forecast.yml`
-läuft täglich am Abend (nach Gate Closure), erzeugt die Prognose für den nächsten Tag neu
-(`python scripts/make_forecast.py`) und committet sie zurück — was den Redeploy auslöst.
-Manuell lässt er sich über *Actions → Daily forecast → Run workflow* anstoßen.
+Die **tägliche Rekonstruktion aktualisiert sich selbst**: Der Workflow `.github/workflows/forecast.yml`
+läuft täglich am Abend (`cron: 0 20 * * *`, nach Gate Closure), erzeugt den Modelllauf für den
+aktuellen Tag neu (`python scripts/make_forecast.py`) und committet ihn zurück — was den Redeploy
+auslöst. **Hinweis:** das ist ein *Nachvollzug* gegen den bereits realisierten Preis, kein
+Vor-Auktions-Forecast (SMARD liefert die D+1-Fundamentalprognosen erst abends — siehe README
+„Grenzen"). Manuell über *Actions → Daily forecast → Run workflow*.
 
 Ändern sich die Backtest-Ergebnisse (`python -m src.evaluate`), die aktualisierten Artefakte
 einfach committen und pushen.
